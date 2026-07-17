@@ -10,6 +10,7 @@ const tabs = [
   { href: "/settings/bank", label: "Bank (Plaid)" },
   { href: "/settings/rules", label: "Rules" },
   { href: "/settings/email-summaries", label: "Email Summaries" },
+  { href: "/settings/ai", label: "AI Model" },
 ] as const;
 
 export function SettingsNav() {

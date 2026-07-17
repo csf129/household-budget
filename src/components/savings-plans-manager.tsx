@@ -17,12 +17,18 @@ import {
 import { createClient } from "@/lib/supabase/client";
 import { mapSavingsContribution, mapSavingsPlan } from "@/lib/map-savings-plan";
 import { SavingsProjectionPanel } from "@/components/savings-projection-panel";
+import {
+  SavingsAccountFlowChart,
+  type SavingsAccountInfo,
+  type SavingsAccountMonthlyTx,
+} from "@/components/savings-account-flow-chart";
 import { getChartAxisTheme } from "@/lib/chart-palette";
 import {
   formatSavingsCadence,
   SAVINGS_INCREMENT_OPTIONS,
 } from "@/lib/savings-plan-cadence";
 import { expectedSavedByDate, formatPlanDateRange } from "@/lib/savings-plan-math";
+import { addCalendarMonths, parseISODateLocal } from "@/lib/savings-plan-schedule";
 import {
   contributionsTotalInRollingDays,
   totalSuggestedWeeklyPaceUsd,
@@ -40,6 +46,8 @@ type Props = {
   householdId: string;
   initialPlans: SavingsPlanWithProgress[];
   initialContributions: SavingsPlanContributionRow[];
+  savingsAccounts: SavingsAccountInfo[];
+  savingsTxByAccount: SavingsAccountMonthlyTx[];
 };
 
 function kindLabel(k: SavingsPlanKind) {
@@ -77,6 +85,8 @@ export function SavingsPlansManager({
   householdId,
   initialPlans,
   initialContributions,
+  savingsAccounts,
+  savingsTxByAccount,
 }: Props) {
   const router = useRouter();
   const [plans, setPlans] = useState(initialPlans);
@@ -135,6 +145,18 @@ export function SavingsPlansManager({
   useEffect(() => {
     setContributions(initialContributions);
   }, [initialContributions]);
+
+  const progressChartData = useMemo(
+    () =>
+      plans
+        .filter((p) => !p.is_archived)
+        .map((p) => ({
+          name: p.title.length > 14 ? p.title.slice(0, 14) + "…" : p.title,
+          Projected: Math.round(p.expected_by_today * 100) / 100,
+          Actual: Math.round(p.total_saved * 100) / 100,
+        })),
+    [plans],
+  );
 
   const contribsByPlan = useMemo(() => {
     const m = new Map<string, SavingsPlanContributionRow[]>();
@@ -257,6 +279,32 @@ export function SavingsPlansManager({
         prev.map((x) =>
           x.id === planId ? recomputeProgressForPlan(mapped) : x,
         ),
+      );
+    }
+    router.refresh();
+  }
+
+  async function extendDeadline(plan: SavingsPlanWithProgress, months: number) {
+    setBusy(true);
+    setError(null);
+    const current = parseISODateLocal(plan.target_date);
+    const next = addCalendarMonths(current, months);
+    const pad = (n: number) => String(n).padStart(2, "0");
+    const newDate = `${next.getFullYear()}-${pad(next.getMonth() + 1)}-${pad(next.getDate())}`;
+    const supabase = createClient();
+    const { data, error: upErr } = await supabase
+      .from("savings_plans")
+      .update({ target_date: newDate, updated_at: new Date().toISOString() })
+      .eq("id", plan.id)
+      .eq("household_id", householdId)
+      .select("*")
+      .single();
+    setBusy(false);
+    if (upErr) { setError(upErr.message); return; }
+    if (data) {
+      const mapped = mapSavingsPlan(data);
+      setPlans((prev) =>
+        prev.map((x) => x.id === plan.id ? recomputeProgressForPlan(mapped) : x),
       );
     }
     router.refresh();
@@ -566,7 +614,9 @@ export function SavingsPlansManager({
         </p>
       ) : null}
 
-      <SavingsProjectionPanel plans={plans} />
+      <SavingsAccountFlowChart accounts={savingsAccounts} txByAccount={savingsTxByAccount} />
+
+      <SavingsProjectionPanel plans={plans} householdId={householdId} />
 
       <section className="rounded-xl border border-zinc-200 bg-white p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-900 dark:shadow-black/30">
         <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
@@ -653,6 +703,67 @@ export function SavingsPlansManager({
           </ResponsiveContainer>
         </div>
       </section>
+
+      {progressChartData.length > 0 && (
+        <section className="rounded-xl border border-zinc-200 bg-white p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-900 dark:shadow-black/30">
+          <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+            Real vs Projected progress
+          </h2>
+          <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
+            How much you have actually saved versus where you should be by today based on each plan&apos;s schedule.
+          </p>
+          <div className="mt-4 flex flex-wrap gap-x-4 gap-y-1 text-xs text-zinc-500 dark:text-zinc-400">
+            <span className="flex items-center gap-1.5">
+              <span className="inline-block h-2.5 w-2.5 rounded-sm bg-zinc-300 dark:bg-zinc-600" />
+              Projected by today
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span className="inline-block h-2.5 w-2.5 rounded-sm bg-violet-500" />
+              Actually saved
+            </span>
+          </div>
+          <div className="mt-3 h-[240px] w-full min-w-0">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart
+                data={progressChartData}
+                margin={{ top: 8, right: 12, left: 4, bottom: 8 }}
+                barCategoryGap="30%"
+                barGap={4}
+              >
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={chartAxis.gridStroke} />
+                <XAxis
+                  dataKey="name"
+                  tick={{ fontSize: 11, fill: chartAxis.tickFill }}
+                  interval={0}
+                  height={40}
+                />
+                <YAxis
+                  tick={{ fontSize: 11, fill: chartAxis.tickFill }}
+                  tickFormatter={(v) => formatUsdCompact(Number(v))}
+                  width={56}
+                />
+                <Tooltip
+                  content={({ active, payload, label }) => {
+                    if (!active || !payload?.length) return null;
+                    return (
+                      <div className={chartAxis.tooltipShell}>
+                        <div className={chartAxis.tooltipTitle}>{label}</div>
+                        {payload.map((p) => (
+                          <div key={p.name} className={chartAxis.tooltipBody}>
+                            {p.name}: {formatUsd(Number(p.value))}
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  }}
+                />
+                <Bar dataKey="Projected" fill={isDark ? "#52525b" : "#d4d4d8"} radius={[4, 4, 0, 0]} maxBarSize={40} />
+                <Bar dataKey="Actual" fill={isDark ? "#8b5cf6" : "#7c3aed"} radius={[4, 4, 0, 0]} maxBarSize={40} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </section>
+      )}
 
       <label className="flex cursor-pointer items-center gap-2 text-sm text-zinc-700 dark:text-zinc-300">
         <input
@@ -762,6 +873,16 @@ export function SavingsPlansManager({
             );
             const gap = plan.total_saved - plan.expected_by_today;
             const planContribs = contribsByPlan.get(plan.id) ?? [];
+            const isBehind = gap < 0 && !plan.is_archived;
+            const remaining = Math.max(0, plan.target_amount - plan.total_saved);
+            const now = new Date();
+            const targetDate = parseISODateLocal(plan.target_date);
+            const remainingMonths = Math.max(
+              1,
+              (targetDate.getFullYear() - now.getFullYear()) * 12 +
+                (targetDate.getMonth() - now.getMonth()),
+            );
+            const adjustedMonthly = remaining / remainingMonths;
 
             return (
               <article
@@ -847,6 +968,36 @@ export function SavingsPlansManager({
                     Gap {formatUsd(gap)}
                   </p>
                 </div>
+
+                {isBehind && (
+                  <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 dark:border-amber-900/50 dark:bg-amber-950/30">
+                    <p className="text-xs font-semibold text-amber-800 dark:text-amber-300">
+                      Behind by {formatUsd(Math.abs(gap))}
+                    </p>
+                    <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">
+                      To still reach {formatUsd(plan.target_amount)} by {new Date(plan.target_date + "T00:00:00").toLocaleDateString("en-US", { month: "short", year: "numeric" })}, save{" "}
+                      <span className="font-semibold">{formatUsd(adjustedMonthly)}/month</span> for the next {remainingMonths} month{remainingMonths === 1 ? "" : "s"}.
+                    </p>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => void extendDeadline(plan, 1)}
+                        disabled={busy}
+                        className="rounded-md border border-amber-300 bg-white px-2.5 py-1 text-xs font-medium text-amber-800 hover:bg-amber-50 disabled:opacity-50 dark:border-amber-800 dark:bg-transparent dark:text-amber-300 dark:hover:bg-amber-950/40"
+                      >
+                        Extend by 1 month
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void extendDeadline(plan, 3)}
+                        disabled={busy}
+                        className="rounded-md border border-amber-300 bg-white px-2.5 py-1 text-xs font-medium text-amber-800 hover:bg-amber-50 disabled:opacity-50 dark:border-amber-800 dark:bg-transparent dark:text-amber-300 dark:hover:bg-amber-950/40"
+                      >
+                        Extend by 3 months
+                      </button>
+                    </div>
+                  </div>
+                )}
 
                 {plan.notes ? (
                   <p className="mt-3 text-sm text-zinc-600 dark:text-zinc-400">

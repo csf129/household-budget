@@ -15,7 +15,7 @@ import {
 } from "@/lib/category-display";
 import { categoryDisplayName } from "@/lib/dashboard-analytics";
 import { formatUsd } from "@/lib/money";
-import type { AccountRow, CategoryRow, ReceiptRow, TransactionRow } from "@/types/finance";
+import type { AccountRow, CategoryRow, ReceiptRow, SavingsPlanRow, TransactionRow } from "@/types/finance";
 import { ReceiptUploader } from "@/components/receipt-uploader";
 
 type Props = {
@@ -23,6 +23,7 @@ type Props = {
   householdId: string;
   categories: CategoryRow[];
   accounts?: AccountRow[];
+  plans?: SavingsPlanRow[];
   /** Rows in the ledger that share normalized_description with this transaction */
   matchCount: number;
   /** When false, archive column is omitted from filters (DB migration not applied). */
@@ -46,6 +47,7 @@ export function TransactionEditModal({
   householdId,
   categories,
   accounts = [],
+  plans = [],
   matchCount,
   ledgerArchiveColumnAvailable,
   onClose,
@@ -66,6 +68,7 @@ export function TransactionEditModal({
     "" | "include" | "exclude"
   >("");
   const [isBusinessExpense, setIsBusinessExpense] = useState(false);
+  const [savingsPlanId, setSavingsPlanId] = useState("");
   const [receipts, setReceipts] = useState<ReceiptRow[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -89,6 +92,7 @@ export function TransactionEditModal({
         : "",
     );
     setIsBusinessExpense(transaction.is_business_expense ?? false);
+    setSavingsPlanId(transaction.savings_plan_id ?? "");
     setError(null);
   }, [transaction]);
 
@@ -260,6 +264,7 @@ export function TransactionEditModal({
       }
       singlePatch.account_id = accountId === "" ? null : accountId;
       singlePatch.is_business_expense = isBusinessExpense;
+      singlePatch.savings_plan_id = savingsPlanId === "" ? null : savingsPlanId;
       if (descriptionScope === "this" && descDirty) {
         singlePatch.raw_description = newDescTrimmed;
         singlePatch.normalized_description = newNorm;
@@ -830,6 +835,33 @@ export function TransactionEditModal({
                   </span>
                 </span>
               </label>
+
+              {plans.length > 0 && (
+                <div>
+                  <label
+                    htmlFor="edit-tx-plan"
+                    className="text-xs font-medium text-zinc-500 dark:text-zinc-400"
+                  >
+                    Savings plan (optional)
+                  </label>
+                  <select
+                    id="edit-tx-plan"
+                    value={savingsPlanId}
+                    onChange={(e) => setSavingsPlanId(e.target.value)}
+                    className="mt-1 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none focus:border-zinc-500 focus:ring-2 focus:ring-zinc-400/30 dark:border-zinc-600 dark:bg-zinc-950 dark:text-zinc-100 dark:focus:ring-zinc-500/25"
+                  >
+                    <option value="">Not linked to a plan</option>
+                    {plans.filter((p) => !p.is_archived).map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.title}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="mt-1 text-xs text-zinc-400 dark:text-zinc-500">
+                    Link this transaction to a plan and its amount counts toward the goal.
+                  </p>
+                </div>
+              )}
 
               <label className="flex cursor-pointer items-start gap-2 text-sm text-zinc-700 dark:text-zinc-300">
                 <input

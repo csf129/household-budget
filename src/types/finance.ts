@@ -103,6 +103,8 @@ export type TransactionRow = {
   account_name?: string | null;
   /** Receipts attached to this transaction (populated on demand). */
   receipts?: ReceiptRow[];
+  /** When set, transaction is linked to a savings plan and counts toward its goal. */
+  savings_plan_id?: string | null;
 };
 
 export type ReceiptRow = {

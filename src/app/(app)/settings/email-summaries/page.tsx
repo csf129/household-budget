@@ -33,6 +33,8 @@ export default async function EmailSummariesPage() {
           top_transactions: Boolean(data.section_top_transactions ?? false),
           business_expenses: Boolean(data.section_business_expenses ?? false),
           savings_plans: Boolean(data.section_savings_plans ?? false),
+          card_reminders: Boolean(data.section_card_reminders ?? false),
+          ai_insights: Boolean(data.section_ai_insights ?? false),
         },
         last_sent_at: data.last_sent_at ? String(data.last_sent_at) : null,
       }
@@ -46,6 +48,8 @@ export default async function EmailSummariesPage() {
           top_transactions: false,
           business_expenses: false,
           savings_plans: false,
+          card_reminders: false,
+          ai_insights: false,
         },
         last_sent_at: null,
       };

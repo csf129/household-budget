@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { getHouseholdForUser } from "@/lib/household";
 import { createClient } from "@/lib/supabase/server";
+import { callAi } from "@/lib/call-ai";
+import { getHouseholdAiModel } from "@/lib/get-household-ai-model";
 
 export const maxDuration = 30;
 
@@ -13,10 +15,6 @@ type Action = {
 };
 
 export async function POST(request: Request) {
-  const apiKey = process.env.OPENAI_API_KEY?.trim();
-  if (!apiKey) {
-    return NextResponse.json({ error: "OPENAI_API_KEY is required." }, { status: 503 });
-  }
   let body: { question?: string; reply?: string } = {};
   try {
     body = (await request.json()) as typeof body;
@@ -37,11 +35,14 @@ export async function POST(request: Request) {
   const household = await getHouseholdForUser(supabase, user.id);
   if (!household) return NextResponse.json({ error: "No household." }, { status: 403 });
 
-  const { data: categories, error } = await supabase
-    .from("categories")
-    .select("id, name, monthly_budget")
-    .eq("household_id", household.householdId)
-    .order("sort_order", { ascending: true });
+  const [{ data: categories, error }, modelId] = await Promise.all([
+    supabase
+      .from("categories")
+      .select("id, name, monthly_budget")
+      .eq("household_id", household.householdId)
+      .order("sort_order", { ascending: true }),
+    getHouseholdAiModel(supabase, household.householdId),
+  ]);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
   const catList = (categories ?? []).map((c) => ({
@@ -53,16 +54,13 @@ export async function POST(request: Request) {
         : Number(c.monthly_budget),
   }));
 
-  const aiRes = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model: "gpt-4o-mini",
+  let raw = "";
+  try {
+    raw = await callAi({
+      modelId,
       temperature: 0,
-      response_format: { type: "json_object" },
+      maxTokens: 512,
+      jsonMode: true,
       messages: [
         {
           role: "system",
@@ -79,13 +77,11 @@ export async function POST(request: Request) {
             .join("\n")}\n\nOutput schema: {"actions":[{"type":"set_category_budget","categoryId":"uuid","categoryName":"name","monthlyBudget":123.45,"reason":"short"}]}`,
         },
       ],
-    }),
-  });
-  if (!aiRes.ok) {
+    });
+  } catch {
     return NextResponse.json({ actions: [] satisfies Action[] });
   }
-  const data = (await aiRes.json()) as { choices?: Array<{ message?: { content?: string } }> };
-  const raw = data.choices?.[0]?.message?.content?.trim();
+
   if (!raw) return NextResponse.json({ actions: [] satisfies Action[] });
   let parsed: { actions?: unknown } = {};
   try {
@@ -115,4 +111,3 @@ export async function POST(request: Request) {
 
   return NextResponse.json({ actions: actions.slice(0, 4) });
 }
-

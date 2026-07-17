@@ -1,8 +1,12 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { SummarySections, SummaryPeriod } from "@/types/email-summary";
 import type { SummaryData } from "@/lib/email-summary-template";
+import { generateAiInsights } from "@/lib/ai-summary-insights";
+import { getHouseholdAiModel } from "@/lib/get-household-ai-model";
 import { fetchAllHouseholdTransactions } from "@/lib/fetch-household-transactions";
 import { fetchSavingsPlansWithProgress } from "@/lib/fetch-savings-plans";
+import { fetchCreditCards } from "@/lib/fetch-credit-cards";
+import { buildCardReminders } from "@/lib/credit-card-reminders";
 import { mapTransactionRow } from "@/lib/map-transaction";
 import { mapCategoryRowFromSupabase } from "@/lib/category-display";
 import { attachPrimaryGroupsFromCategoryCatalog } from "@/lib/attach-primary-group-to-transactions";
@@ -179,6 +183,35 @@ export async function fetchEmailSummaryData(
     }
   }
 
+  // ── Credit card reminders ─────────────────────────────────────
+  const cardReminderRows: SummaryData["cardReminderRows"] = [];
+  if (sections.card_reminders) {
+    const { rows: cards } = await fetchCreditCards(supabase, householdId);
+    for (const r of buildCardReminders(cards)) {
+      cardReminderRows.push({
+        cardName: r.cardName,
+        kind: r.kind,
+        date: r.date,
+        daysUntil: r.daysUntil,
+      });
+    }
+  }
+
+  // ── AI insights ───────────────────────────────────────────────
+  const aiModelId = sections.ai_insights
+    ? await getHouseholdAiModel(supabase, householdId)
+    : undefined;
+  const aiInsights = sections.ai_insights
+    ? await generateAiInsights({
+        periodLabel: label,
+        totalIncome,
+        totalSpending,
+        categoryRows: categoryRowsOut,
+        budgetRows,
+        modelId: aiModelId,
+      })
+    : "";
+
   return {
     householdName,
     periodLabel: label,
@@ -192,5 +225,7 @@ export async function fetchEmailSummaryData(
     businessExpenseTotal,
     businessMissingReceiptsCount,
     savingsPlanRows,
+    cardReminderRows,
+    aiInsights,
   };
 }

@@ -1,7 +1,5 @@
-/**
- * Server-only: map imported spreadsheet lines to household category monthly budgets.
- */
-
+import { callAi } from "@/lib/call-ai";
+import { DEFAULT_AI_MODEL_ID } from "@/lib/ai-models";
 import type { CategoryContext } from "@/lib/auto-categorize-openai";
 
 export type BudgetLineForLlm = {
@@ -38,7 +36,7 @@ function buildUserContent(
 
   const total = linesMonthlyTotal.toFixed(2);
 
-  return `Household categories (use these ids only):\n${catLines.join("\n")}\n\nSpreadsheet-derived expense lines (allocate each line’s monthly equivalent to the best-matching category; every dollar must land in exactly one category):\n${lineSummaries.join("\n")}\n\nCRITICAL: The sum of all line monthly equivalents above is EXACTLY $${total}. The sum of every "monthlyBudget" in your proposals MUST equal $${total} within $1.00 (rounding only). Do not shrink or inflate the total.\n\nReturn JSON: {"summary":"short explanation for the user","proposals":[{"categoryId":"<uuid>","monthlyBudget":123.45}]}\nRules: Include every category id from the list exactly once. monthlyBudget is USD per month, >= 0, two decimal places. If no lines map to a category, use 0.`;
+  return `Household categories (use these ids only):\n${catLines.join("\n")}\n\nSpreadsheet-derived expense lines (allocate each line's monthly equivalent to the best-matching category; every dollar must land in exactly one category):\n${lineSummaries.join("\n")}\n\nCRITICAL: The sum of all line monthly equivalents above is EXACTLY $${total}. The sum of every "monthlyBudget" in your proposals MUST equal $${total} within $1.00 (rounding only). Do not shrink or inflate the total.\n\nReturn JSON: {"summary":"short explanation for the user","proposals":[{"categoryId":"<uuid>","monthlyBudget":123.45}]}\nRules: Include every category id from the list exactly once. monthlyBudget is USD per month, >= 0, two decimal places. If no lines map to a category, use 0.`;
 }
 
 function roundMoney(n: number): number {
@@ -46,10 +44,11 @@ function roundMoney(n: number): number {
 }
 
 export async function fetchCategoryBudgetsFromOpenAI(
-  apiKey: string,
+  _apiKey: string,
   categories: CategoryContext[],
   lines: BudgetLineForLlm[],
   linesMonthlyTotal: number,
+  modelId?: string,
 ): Promise<BudgetProposeResult> {
   if (categories.length === 0) {
     throw new Error("No categories available.");
@@ -58,41 +57,25 @@ export async function fetchCategoryBudgetsFromOpenAI(
     throw new Error("No spreadsheet lines to allocate.");
   }
 
+  const model = modelId ?? DEFAULT_AI_MODEL_ID;
   const content = buildUserContent(categories, lines, linesMonthlyTotal);
 
-  const res = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model: "gpt-4o-mini",
-      temperature: 0.2,
-      response_format: { type: "json_object" },
-      messages: [
-        {
-          role: "system",
-          content:
-            "You are a household budgeting assistant. Map spreadsheet budget lines to the user’s app categories. Reply with compact JSON only.",
-        },
-        { role: "user", content },
-      ],
-    }),
+  const raw = await callAi({
+    modelId: model,
+    temperature: 0.2,
+    maxTokens: 4096,
+    jsonMode: true,
+    messages: [
+      {
+        role: "system",
+        content:
+          "You are a household budgeting assistant. Map spreadsheet budget lines to the user's app categories. Reply with compact JSON only.",
+      },
+      { role: "user", content },
+    ],
   });
 
-  if (!res.ok) {
-    const errText = await res.text();
-    throw new Error(
-      `OpenAI request failed (${res.status}): ${errText.slice(0, 500)}`,
-    );
-  }
-
-  const data = (await res.json()) as {
-    choices?: Array<{ message?: { content?: string } }>;
-  };
-  const raw = data.choices?.[0]?.message?.content?.trim();
-  if (!raw) throw new Error("Empty response from OpenAI.");
+  if (!raw) throw new Error("Empty response from AI.");
 
   let parsed: unknown;
   try {

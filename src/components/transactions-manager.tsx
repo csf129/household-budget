@@ -39,7 +39,7 @@ import {
   sortCategoriesForPicker,
 } from "@/lib/category-display";
 import { categoryDisplayName } from "@/lib/dashboard-analytics";
-import type { AccountRow, CategoryRow, TransactionRow } from "@/types/finance";
+import type { AccountRow, CategoryRow, SavingsPlanRow, TransactionRow } from "@/types/finance";
 
 export type { TransactionRow } from "@/types/finance";
 
@@ -58,6 +58,7 @@ type Props = {
   defaultAccountId: string | null;
   /** When false, soft-archive UI is hidden (DB migration not applied). */
   ledgerArchiveColumnAvailable: boolean;
+  plans?: SavingsPlanRow[];
 };
 
 function parseAmount(value: unknown): number {
@@ -99,6 +100,7 @@ export function TransactionsManager({
   accounts,
   defaultAccountId,
   ledgerArchiveColumnAvailable,
+  plans = [],
 }: Props) {
   const router = useRouter();
   const [importAccountId, setImportAccountId] = useState(
@@ -830,6 +832,27 @@ export function TransactionsManager({
         ? "No changes. Either every transaction already has a category, or the model did not match any row to your categories."
         : `Assigned categories to ${total} transaction${total === 1 ? "" : "s"} (up to ${BATCH} per request). Run again if more are uncategorized.`,
     );
+    // Always sync category_id from DB into client state. This fixes stale state
+    // where a previous run updated the DB but router.refresh() failed to propagate it.
+    {
+      const supabase = createClient();
+      const { data: freshCats } = await supabase
+        .from("transactions")
+        .select("id, category_id")
+        .eq("household_id", householdId)
+        .not("category_id", "is", null);
+      if (freshCats && freshCats.length > 0) {
+        const catMap = new Map(
+          freshCats.map((r) => [String(r.id), r.category_id ? String(r.category_id) : null]),
+        );
+        setRows((prev) =>
+          prev.map((row) => {
+            const newCat = catMap.get(row.id);
+            return newCat !== undefined ? { ...row, category_id: newCat } : row;
+          }),
+        );
+      }
+    }
     router.refresh();
   }
 
@@ -935,6 +958,7 @@ export function TransactionsManager({
         householdId={householdId}
         categories={categories}
         accounts={accounts}
+        plans={plans}
         matchCount={editMatchCount}
         ledgerArchiveColumnAvailable={ledgerArchiveColumnAvailable}
         onClose={() => setEditingTx(null)}

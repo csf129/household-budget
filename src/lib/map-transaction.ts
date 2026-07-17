@@ -86,6 +86,7 @@ export function mapTransactionRow(raw: unknown): TransactionRow {
 
   const ptid = r.plaid_transaction_id;
   const arch = r.ledger_archived_at;
+  const spid = r.savings_plan_id;
   return {
     id: String(r.id),
     amount,
@@ -109,5 +110,7 @@ export function mapTransactionRow(raw: unknown): TransactionRow {
         : null,
     plaid_feed_only: false,
     account_name: null,
+    savings_plan_id:
+      spid != null && String(spid).trim() !== "" ? String(spid) : null,
   };
 }

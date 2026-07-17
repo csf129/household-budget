@@ -5,6 +5,8 @@ import {
   withActiveLedgerOnly,
 } from "@/lib/ledger-archive-schema";
 import { createClient } from "@/lib/supabase/server";
+import { callAi, streamAi } from "@/lib/call-ai";
+import { getHouseholdAiModel } from "@/lib/get-household-ai-model";
 
 export const maxDuration = 60;
 
@@ -19,7 +21,7 @@ function monthKey(isoDate: string): string {
   return isoDate.slice(0, 7);
 }
 
-async function buildPromptMessages(messages: Array<{ role: "user" | "assistant"; content: string }>) {
+async function buildPromptContext(messages: Array<{ role: "user" | "assistant"; content: string }>) {
   const supabase = await createClient();
   const {
     data: { user },
@@ -38,7 +40,7 @@ async function buildPromptMessages(messages: Array<{ role: "user" | "assistant";
 
   const hasLedgerArchive = await ledgerArchiveColumnExists(supabase);
 
-  const [tx90Res, tx365Res, catRes, acctRes, plansRes, contribRes] =
+  const [tx90Res, tx365Res, catRes, acctRes, plansRes, contribRes, modelRes] =
     await Promise.all([
       withActiveLedgerOnly(
         supabase
@@ -75,7 +77,9 @@ async function buildPromptMessages(messages: Array<{ role: "user" | "assistant";
         .from("savings_plan_contributions")
         .select("savings_plan_id, amount")
         .eq("household_id", household.householdId),
+      getHouseholdAiModel(supabase, household.householdId),
     ]);
+
   const err =
     tx90Res.error ||
     tx365Res.error ||
@@ -91,6 +95,7 @@ async function buildPromptMessages(messages: Array<{ role: "user" | "assistant";
   const accounts = acctRes.data ?? [];
   const plans = plansRes.data ?? [];
   const contributions = contribRes.data ?? [];
+  const modelId = modelRes as string;
 
   let spend90 = 0;
   let income90 = 0;
@@ -176,47 +181,23 @@ async function buildPromptMessages(messages: Array<{ role: "user" | "assistant";
 
   const promptMessages = [
     {
-      role: "system",
+      role: "system" as const,
       content:
         "You are an in-app household budget copilot. Be concise, practical, and numeric. Give step-by-step recommendations. Mention navigation targets when helpful.",
     },
     {
-      role: "system",
+      role: "system" as const,
       content:
         "Navigation: Overview for trends, Transactions for details/filters, Plans for goals, Settings > Budget for category budgets, Settings > Bank for sync.",
     },
-    { role: "system", content: `Household context:\n${context}` },
+    { role: "system" as const, content: `Household context:\n${context}` },
     ...messages.map((m) => ({ role: m.role, content: m.content })),
   ];
 
-  return { promptMessages };
-}
-
-async function fetchOpenAIStream(apiKey: string, promptMessages: unknown[]) {
-  return fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model: "gpt-4o-mini",
-      temperature: 0.2,
-      stream: true,
-      messages: promptMessages,
-    }),
-  });
+  return { promptMessages, modelId };
 }
 
 export async function POST(request: Request) {
-  const apiKey = process.env.OPENAI_API_KEY?.trim();
-  if (!apiKey) {
-    return NextResponse.json(
-      { error: "AI assistant requires OPENAI_API_KEY in .env.local.", code: "NO_AI_KEY" },
-      { status: 503 },
-    );
-  }
-
   let body: { messages?: ChatMsg[] } = {};
   try {
     body = (await request.json()) as typeof body;
@@ -227,9 +208,7 @@ export async function POST(request: Request) {
   const rawMessages = Array.isArray(body.messages) ? body.messages : [];
   const messages: Array<{ role: "user" | "assistant"; content: string }> = rawMessages
     .map((m) => ({
-      role: (m.role === "assistant" ? "assistant" : "user") as
-        | "user"
-        | "assistant",
+      role: (m.role === "assistant" ? "assistant" : "user") as "user" | "assistant",
       content: typeof m.content === "string" ? m.content.trim() : "",
     }))
     .filter((m) => m.content.length > 0)
@@ -238,82 +217,36 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Please include at least one user message." }, { status: 400 });
   }
 
-  const promptResult = await buildPromptMessages(messages);
+  const promptResult = await buildPromptContext(messages);
   if ("error" in promptResult) {
     return NextResponse.json({ error: promptResult.error }, { status: promptResult.status });
   }
 
+  const { promptMessages, modelId } = promptResult;
+
   if (!streamMode) {
-    const aiRes = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: "gpt-4o-mini",
-        temperature: 0.2,
-        messages: promptResult.promptMessages,
-      }),
-    });
-    if (!aiRes.ok) {
-      const txt = await aiRes.text();
-      return NextResponse.json({ error: `OpenAI failed (${aiRes.status}): ${txt.slice(0, 200)}` }, { status: 502 });
-    }
-    const data = (await aiRes.json()) as { choices?: Array<{ message?: { content?: string } }> };
-    const reply = data.choices?.[0]?.message?.content?.trim();
-    if (!reply) {
-      return NextResponse.json({ error: "AI returned an empty response." }, { status: 502 });
-    }
-    return NextResponse.json({ reply });
-  }
-
-  const aiRes = await fetchOpenAIStream(apiKey, promptResult.promptMessages);
-  if (!aiRes.ok || !aiRes.body) {
-    const txt = await aiRes.text();
-    return NextResponse.json({ error: `OpenAI stream failed (${aiRes.status}): ${txt.slice(0, 200)}` }, { status: 502 });
-  }
-
-  const encoder = new TextEncoder();
-  const decoder = new TextDecoder();
-  const out = new ReadableStream<Uint8Array>({
-    async start(controller) {
-      const reader = aiRes.body!.getReader();
-      let buffer = "";
-      try {
-        while (true) {
-          const { value, done } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split("\n");
-          buffer = lines.pop() ?? "";
-          for (const line of lines) {
-            const trimmed = line.trim();
-            if (!trimmed.startsWith("data:")) continue;
-            const payload = trimmed.slice(5).trim();
-            if (payload === "[DONE]") continue;
-            try {
-              const obj = JSON.parse(payload) as {
-                choices?: Array<{ delta?: { content?: string } }>;
-              };
-              const chunk = obj.choices?.[0]?.delta?.content ?? "";
-              if (chunk) controller.enqueue(encoder.encode(chunk));
-            } catch {
-              // ignore malformed chunk lines
-            }
-          }
-        }
-      } finally {
-        controller.close();
+    try {
+      const reply = await callAi({ modelId, messages: promptMessages, temperature: 0.2 });
+      if (!reply) {
+        return NextResponse.json({ error: "AI returned an empty response." }, { status: 502 });
       }
-    },
-  });
+      return NextResponse.json({ reply });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return NextResponse.json({ error: msg }, { status: 502 });
+    }
+  }
 
-  return new Response(out, {
-    headers: {
-      "Content-Type": "text/plain; charset=utf-8",
-      "Cache-Control": "no-cache, no-transform",
-    },
-  });
+  try {
+    const stream = await streamAi({ modelId, messages: promptMessages, temperature: 0.2 });
+    return new Response(stream, {
+      headers: {
+        "Content-Type": "text/plain; charset=utf-8",
+        "Cache-Control": "no-cache, no-transform",
+      },
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return NextResponse.json({ error: msg }, { status: 502 });
+  }
 }
-

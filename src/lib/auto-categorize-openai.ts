@@ -1,7 +1,5 @@
-/**
- * Server-only: calls OpenAI to map transaction descriptions to category IDs.
- * Requires OPENAI_API_KEY in the environment.
- */
+import { callAi } from "@/lib/call-ai";
+import { DEFAULT_AI_MODEL_ID } from "@/lib/ai-models";
 
 export type CategoryContext = {
   id: string;
@@ -30,60 +28,45 @@ function buildUserPayload(
     const flow = t.amount >= 0 ? "income" : "expense";
     return `- id=${t.id} ${flow} amount=${t.amount} description="${t.raw_description.replace(/"/g, "'").slice(0, 400)}"`;
   });
-  return `Household categories (pick categoryId only from this list):\n${catLines.join("\n")}\n\nTransactions to categorize:\n${txLines.join("\n")}\n\nReturn JSON: {"assignments":[{"transactionId":"<uuid>","categoryId":"<uuid of best category or null if none fits>"}]}\nInclude every transaction id exactly once. Use null when no category is a reasonable fit.`;
+  return `Household categories (pick categoryId only from this list):\n${catLines.join("\n")}\n\nTransactions to categorize:\n${txLines.join("\n")}\n\nReturn JSON: {"assignments":[{"transactionId":"<uuid>","categoryId":"<uuid from the list above>"}]}\nOnly include transactions you can confidently assign. Omit any transaction you cannot match — do NOT use null.`;
 }
 
 export type LlmAssignment = { transactionId: string; categoryId: string | null };
 
 export async function fetchAssignmentsFromOpenAI(
-  apiKey: string,
+  _apiKey: string,
   categories: CategoryContext[],
   transactions: TransactionContext[],
+  modelId?: string,
 ): Promise<LlmAssignment[]> {
   if (transactions.length === 0) return [];
   if (categories.length === 0) {
     throw new Error("No categories available to assign.");
   }
 
+  const model = modelId ?? DEFAULT_AI_MODEL_ID;
   const all: LlmAssignment[] = [];
 
   for (let i = 0; i < transactions.length; i += BATCH_SIZE) {
     const batch = transactions.slice(i, i + BATCH_SIZE);
     const content = buildUserPayload(categories, batch);
 
-    const res = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: "gpt-4o-mini",
-        temperature: 0.1,
-        response_format: { type: "json_object" },
-        messages: [
-          {
-            role: "system",
-            content:
-              "You categorize personal finance transactions. Reply with compact JSON only. categoryId must be one of the provided category ids or null.",
-          },
-          { role: "user", content },
-        ],
-      }),
+    const raw = await callAi({
+      modelId: model,
+      temperature: 0.1,
+      maxTokens: 4096,
+      jsonMode: true,
+      messages: [
+        {
+          role: "system",
+          content:
+            "You categorize personal finance transactions. Reply with compact JSON only. categoryId must be one of the provided category ids — never null, never invented.",
+        },
+        { role: "user", content },
+      ],
     });
 
-    if (!res.ok) {
-      const errText = await res.text();
-      throw new Error(
-        `OpenAI request failed (${res.status}): ${errText.slice(0, 500)}`,
-      );
-    }
-
-    const data = (await res.json()) as {
-      choices?: Array<{ message?: { content?: string } }>;
-    };
-    const raw = data.choices?.[0]?.message?.content?.trim();
-    if (!raw) throw new Error("Empty response from OpenAI.");
+    if (!raw) throw new Error("Empty response from AI.");
 
     let parsed: unknown;
     try {

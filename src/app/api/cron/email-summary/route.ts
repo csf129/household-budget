@@ -69,6 +69,8 @@ export async function GET(req: Request) {
       top_transactions: Boolean(row.section_top_transactions),
       business_expenses: Boolean(row.section_business_expenses),
       savings_plans: Boolean(row.section_savings_plans),
+      card_reminders: Boolean(row.section_card_reminders),
+      ai_insights: Boolean(row.section_ai_insights),
     };
 
     // Send one email per matching frequency (e.g. both weekly + monthly on the 1st)

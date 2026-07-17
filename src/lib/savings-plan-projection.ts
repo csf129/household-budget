@@ -46,7 +46,7 @@ function monthsOverlappingRange(from: Date, to: Date): Date[] {
   return out;
 }
 
-function bucketKeyForDate(d: Date, g: ProjectionGranularity): string {
+export function bucketKeyForDate(d: Date, g: ProjectionGranularity): string {
   const y = d.getFullYear();
   const m = d.getMonth() + 1;
   if (g === "annual") return String(y);
@@ -98,21 +98,21 @@ function collectRecurringEvents(
   incrementAmount: number,
   period: SavingsIncrementPeriod,
 ): Event[] {
-  const events: Event[] = [];
-  let remaining = Math.max(0, plan.target_amount - plan.total_saved);
-  if (remaining <= 0) return events;
-
+  if (plan.target_amount <= 0) return [];
   const rs = startOfDayLocal(rangeStart);
   const re = startOfDayLocal(rangeEnd);
-
+  // Track total scheduled (based on plan schedule only, not actual savings)
+  let scheduled = 0;
+  const events: Event[] = [];
   for (let n = 0; n < 500_000; n++) {
     const d = nthInstallmentDate(planStart, period, n);
     if (d > planEnd || d > re) break;
-    if (d < rs) continue;
-    if (remaining <= 0) break;
-    const amt = Math.min(incrementAmount, remaining);
-    remaining -= amt;
-    events.push({ date: d, planId: plan.id, amount: amt });
+    if (scheduled >= plan.target_amount) break;
+    const amt = Math.min(incrementAmount, plan.target_amount - scheduled);
+    scheduled += amt;
+    if (d >= rs) {
+      events.push({ date: d, planId: plan.id, amount: amt });
+    }
   }
   return events;
 }
@@ -124,23 +124,18 @@ function collectLinearEvents(
   rangeStart: Date,
   rangeEnd: Date,
 ): Event[] {
-  const today = startOfDayLocal(new Date());
-  const remaining = Math.max(0, plan.target_amount - plan.total_saved);
-  if (remaining <= 0) return [];
-
+  if (plan.target_amount <= 0) return [];
   const rs = startOfDayLocal(rangeStart);
   const re = startOfDayLocal(rangeEnd);
 
-  const remainingStart = maxDate(planStart, today);
-  const remainingEnd = planEnd;
-  if (remainingStart > remainingEnd) return [];
+  // Fixed per-month amount spread evenly across the full plan duration —
+  // independent of total_saved so the projected schedule stays constant.
+  const allPlanMonths = monthsOverlappingRange(planStart, planEnd);
+  if (allPlanMonths.length === 0) return [];
+  const perMonth = plan.target_amount / allPlanMonths.length;
 
-  const months = monthsOverlappingRange(remainingStart, remainingEnd);
-  if (months.length === 0) return [];
-
-  const perMonth = remaining / months.length;
   const events: Event[] = [];
-  for (const ms of months) {
+  for (const ms of allPlanMonths) {
     if (ms >= rs && ms <= re) {
       events.push({ date: ms, planId: plan.id, amount: perMonth });
     }

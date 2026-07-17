@@ -17,6 +17,12 @@ export type SavingsPlanRow = {
   saved: number;
   target: number;
 };
+export type CardReminderRow = {
+  cardName: string;
+  kind: "payment_due" | "fee_renewal";
+  date: string;
+  daysUntil: number;
+};
 
 export type SummaryData = {
   householdName: string;
@@ -37,6 +43,10 @@ export type SummaryData = {
   businessMissingReceiptsCount: number;
   // savings_plans
   savingsPlanRows: SavingsPlanRow[];
+  // card_reminders
+  cardReminderRows: CardReminderRow[];
+  // ai_insights
+  aiInsights: string;
 };
 
 function fmt(n: number): string {
@@ -79,6 +89,8 @@ export function buildSummaryEmail(data: SummaryData): string {
     businessExpenseTotal,
     businessMissingReceiptsCount,
     savingsPlanRows,
+    cardReminderRows,
+    aiInsights,
   } = data;
 
   const net = totalIncome - totalSpending;
@@ -86,6 +98,26 @@ export function buildSummaryEmail(data: SummaryData): string {
   const netLabel = net >= 0 ? "Surplus" : "Deficit";
 
   let body = "";
+
+  // ── AI Insights ────────────────────────────────────────────────
+  if (sections.ai_insights && aiInsights) {
+    body += sectionHeader("AI Spending Insights");
+    const bulletHtml = aiInsights
+      .split("\n")
+      .filter(Boolean)
+      .map((line) =>
+        line.startsWith("•")
+          ? `<p style="margin:6px 0;font-size:13px;color:#18181b;padding-left:4px;">• ${line.slice(1).trim()}</p>`
+          : `<p style="margin:8px 0 2px;font-size:13px;color:#18181b;">${line}</p>`,
+      )
+      .join("");
+    body += `
+    <tr><td>
+      <div style="background:#f9f7ff;border-left:3px solid #7c3aed;border-radius:4px;padding:12px 16px;">
+        ${bulletHtml}
+      </div>
+    </td></tr>`;
+  }
 
   // ── Income & Spending ─────────────────────────────────────────
   if (sections.income_spending) {
@@ -221,6 +253,32 @@ export function buildSummaryEmail(data: SummaryData): string {
         </div>`;
     }
     body += `</td></tr>`;
+  }
+
+  // ── Credit Card Reminders ──────────────────────────────────────
+  if (sections.card_reminders && cardReminderRows.length > 0) {
+    body += sectionHeader("Credit Card Reminders");
+    body += `
+    <tr><td>
+      <table width="100%" cellpadding="0" cellspacing="6" style="border-collapse:collapse;">`;
+    for (const r of cardReminderRows) {
+      const isUrgent = r.daysUntil <= 7;
+      const accent = isUrgent ? "#dc2626" : "#71717a";
+      const label =
+        r.kind === "payment_due"
+          ? r.daysUntil < 0
+            ? `Payment ${Math.abs(r.daysUntil)} day(s) overdue`
+            : `Payment due in ${r.daysUntil} day(s)`
+          : `Annual fee renews in ${r.daysUntil} day(s) — cancel before this if unwanted`;
+      body += `
+        <tr>
+          <td style="padding:8px 0;border-bottom:1px solid #f4f4f5;vertical-align:top;">
+            <p style="margin:0;font-size:13px;color:#18181b;font-weight:600;">${r.cardName}</p>
+            <p style="margin:2px 0 0;font-size:12px;color:${accent};">${label} · ${r.date}</p>
+          </td>
+        </tr>`;
+    }
+    body += `</table></td></tr>`;
   }
 
   return `<!DOCTYPE html>

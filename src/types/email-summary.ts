@@ -7,6 +7,8 @@ export type SummarySections = {
   top_transactions: boolean;
   business_expenses: boolean;
   savings_plans: boolean;
+  card_reminders: boolean;
+  ai_insights: boolean;
 };
 
 export const DEFAULT_SECTIONS: SummarySections = {
@@ -16,6 +18,8 @@ export const DEFAULT_SECTIONS: SummarySections = {
   top_transactions: false,
   business_expenses: false,
   savings_plans: false,
+  card_reminders: false,
+  ai_insights: false,
 };
 
 export const SECTION_LABELS: Record<keyof SummarySections, string> = {
@@ -25,6 +29,8 @@ export const SECTION_LABELS: Record<keyof SummarySections, string> = {
   top_transactions: "Top Transactions",
   business_expenses: "Business Expenses",
   savings_plans: "Savings Plan Progress",
+  card_reminders: "Credit Card Reminders",
+  ai_insights: "AI Spending Insights",
 };
 
 export type EmailSummarySettings = {

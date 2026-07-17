@@ -8,6 +8,7 @@ import {
 import type { ExtractedBudgetLineJson } from "@/lib/parse-budget-spreadsheet";
 import { getHouseholdForUser } from "@/lib/household";
 import { createClient } from "@/lib/supabase/server";
+import { getHouseholdAiModel } from "@/lib/get-household-ai-model";
 
 export const maxDuration = 60;
 
@@ -17,18 +18,6 @@ type Body = {
 };
 
 export async function POST(request: Request) {
-  const apiKey = process.env.OPENAI_API_KEY?.trim();
-  if (!apiKey) {
-    return NextResponse.json(
-      {
-        error:
-          "AI budget proposals require OPENAI_API_KEY in your server environment (.env.local).",
-        code: "NO_AI_KEY",
-      },
-      { status: 503 },
-    );
-  }
-
   let body: Body = {};
   try {
     body = (await request.json()) as Body;
@@ -48,6 +37,8 @@ export async function POST(request: Request) {
   if (!household) {
     return NextResponse.json({ error: "No household." }, { status: 403 });
   }
+
+  const modelId = await getHouseholdAiModel(supabase, household.householdId);
 
   await supabase.rpc("ensure_default_categories_for_my_household");
 
@@ -143,13 +134,14 @@ export async function POST(request: Request) {
   let result;
   try {
     result = await fetchCategoryBudgetsFromOpenAI(
-      apiKey,
+      "",
       catCtx,
       forLlm,
       spreadsheetMonthlyTotal,
+      modelId,
     );
   } catch (e) {
-    const msg = e instanceof Error ? e.message : "OpenAI error.";
+    const msg = e instanceof Error ? e.message : "AI error.";
     return NextResponse.json({ error: msg }, { status: 502 });
   }
 

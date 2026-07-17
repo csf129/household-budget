@@ -50,6 +50,8 @@ export async function POST(req: Request) {
     top_transactions: body.sections?.top_transactions ?? Boolean(savedRow?.section_top_transactions ?? false),
     business_expenses: body.sections?.business_expenses ?? Boolean(savedRow?.section_business_expenses ?? false),
     savings_plans: body.sections?.savings_plans ?? Boolean(savedRow?.section_savings_plans ?? false),
+    card_reminders: body.sections?.card_reminders ?? Boolean(savedRow?.section_card_reminders ?? false),
+    ai_insights: body.sections?.ai_insights ?? Boolean(savedRow?.section_ai_insights ?? false),
   };
 
   let summaryData;

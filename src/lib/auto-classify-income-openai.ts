@@ -1,6 +1,5 @@
-/**
- * Server-only: OpenAI decides whether positive amounts are real overview income.
- */
+import { callAi } from "@/lib/call-ai";
+import { DEFAULT_AI_MODEL_ID } from "@/lib/ai-models";
 
 export type IncomeTxContext = {
   id: string;
@@ -34,50 +33,35 @@ Include every transaction id exactly once.`;
 }
 
 export async function fetchIncomeClassificationsFromOpenAI(
-  apiKey: string,
+  _apiKey: string,
   transactions: IncomeTxContext[],
+  modelId?: string,
 ): Promise<IncomeLlmAssignment[]> {
   if (transactions.length === 0) return [];
 
+  const model = modelId ?? DEFAULT_AI_MODEL_ID;
   const all: IncomeLlmAssignment[] = [];
 
   for (let i = 0; i < transactions.length; i += BATCH_SIZE) {
     const batch = transactions.slice(i, i + BATCH_SIZE);
     const content = buildUserPayload(batch);
 
-    const res = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: "gpt-4o-mini",
-        temperature: 0.1,
-        response_format: { type: "json_object" },
-        messages: [
-          {
-            role: "system",
-            content:
-              "You classify bank transactions for a household budget overview. Reply with compact JSON only. treatment must be include, exclude, or neutral.",
-          },
-          { role: "user", content },
-        ],
-      }),
+    const raw = await callAi({
+      modelId: model,
+      temperature: 0.1,
+      maxTokens: 4096,
+      jsonMode: true,
+      messages: [
+        {
+          role: "system",
+          content:
+            "You classify bank transactions for a household budget overview. Reply with compact JSON only. treatment must be include, exclude, or neutral.",
+        },
+        { role: "user", content },
+      ],
     });
 
-    if (!res.ok) {
-      const errText = await res.text();
-      throw new Error(
-        `OpenAI request failed (${res.status}): ${errText.slice(0, 500)}`,
-      );
-    }
-
-    const data = (await res.json()) as {
-      choices?: Array<{ message?: { content?: string } }>;
-    };
-    const raw = data.choices?.[0]?.message?.content?.trim();
-    if (!raw) throw new Error("Empty response from OpenAI.");
+    if (!raw) throw new Error("Empty response from AI.");
 
     let parsed: unknown;
     try {

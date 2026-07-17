@@ -20,6 +20,8 @@ function rowToSettings(row: Record<string, unknown>): EmailSummarySettings {
       top_transactions: Boolean(row.section_top_transactions ?? false),
       business_expenses: Boolean(row.section_business_expenses ?? false),
       savings_plans: Boolean(row.section_savings_plans ?? false),
+      card_reminders: Boolean(row.section_card_reminders ?? false),
+      ai_insights: Boolean(row.section_ai_insights ?? false),
     },
     last_sent_at: row.last_sent_at ? String(row.last_sent_at) : null,
   };
@@ -35,6 +37,8 @@ const EMPTY_SETTINGS: EmailSummarySettings = {
     top_transactions: false,
     business_expenses: false,
     savings_plans: false,
+    card_reminders: false,
+    ai_insights: false,
   },
   last_sent_at: null,
 };
@@ -85,6 +89,8 @@ export async function PUT(req: Request) {
     section_top_transactions: body.sections?.top_transactions ?? false,
     section_business_expenses: body.sections?.business_expenses ?? false,
     section_savings_plans: body.sections?.savings_plans ?? false,
+    section_card_reminders: body.sections?.card_reminders ?? false,
+    section_ai_insights: body.sections?.ai_insights ?? false,
     updated_at: new Date().toISOString(),
   };
 

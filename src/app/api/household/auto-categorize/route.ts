@@ -10,6 +10,7 @@ import {
   withActiveLedgerOnly,
 } from "@/lib/ledger-archive-schema";
 import { createClient } from "@/lib/supabase/server";
+import { getHouseholdAiModel } from "@/lib/get-household-ai-model";
 
 export const maxDuration = 60;
 
@@ -22,19 +23,6 @@ type Body = {
 };
 
 export async function POST(request: Request) {
-  const apiKey = process.env.OPENAI_API_KEY?.trim();
-  if (!apiKey) {
-    return NextResponse.json(
-      {
-        error:
-          "AI categorization is not configured. Add OPENAI_API_KEY to your server environment (.env.local).",
-        code: "NO_AI_KEY",
-        updated: 0,
-      },
-      { status: 503 },
-    );
-  }
-
   let body: Body = {};
   try {
     body = (await request.json()) as Body;
@@ -55,7 +43,10 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "No household." }, { status: 403 });
   }
 
-  const hasLedgerArchive = await ledgerArchiveColumnExists(supabase);
+  const [hasLedgerArchive, modelId] = await Promise.all([
+    ledgerArchiveColumnExists(supabase),
+    getHouseholdAiModel(supabase, household.householdId),
+  ]);
 
   await supabase.rpc("ensure_default_categories_for_my_household");
 
@@ -149,7 +140,7 @@ export async function POST(request: Request) {
   let assignments;
   try {
     assignments = await fetchAssignmentsFromOpenAI(
-      apiKey,
+      "",
       categoryList.map((c) => ({
         id: String(c.id),
         name: String(c.name ?? ""),
@@ -159,9 +150,10 @@ export async function POST(request: Request) {
             : null,
       })),
       txContexts,
+      modelId,
     );
   } catch (e) {
-    const msg = e instanceof Error ? e.message : "OpenAI error.";
+    const msg = e instanceof Error ? e.message : "AI error.";
     return NextResponse.json({ error: msg }, { status: 502 });
   }
 

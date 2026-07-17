@@ -7,7 +7,7 @@ import type {
   SummaryPeriod,
   SummarySections,
 } from "@/types/email-summary";
-import { SECTION_LABELS } from "@/types/email-summary";
+import { DEFAULT_SECTIONS, SECTION_LABELS } from "@/types/email-summary";
 
 type Props = {
   initial: EmailSummarySettings;
@@ -34,7 +34,7 @@ export function EmailSummarySettingsForm({ initial }: Props) {
   const [emailInput, setEmailInput] = useState("");
   const [emailError, setEmailError] = useState("");
   const [frequencies, setFrequencies] = useState<SummaryFrequency[]>(initial.frequencies);
-  const [sections, setSections] = useState<SummarySections>(initial.sections);
+  const [sections, setSections] = useState<SummarySections>({ ...DEFAULT_SECTIONS, ...initial.sections });
   const [lastSentAt, setLastSentAt] = useState<string | null>(initial.last_sent_at);
 
   const [saving, setSaving] = useState(false);

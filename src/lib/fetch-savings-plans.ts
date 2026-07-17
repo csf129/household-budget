@@ -43,6 +43,21 @@ export async function fetchSavingsPlansWithProgress(
     savedByPlan.set(pid, (savedByPlan.get(pid) ?? 0) + n);
   }
 
+  // Also sum linked transactions (savings_plan_id column may not exist yet if migration hasn't run)
+  const { data: linkedTxRaw } = await supabase
+    .from("transactions")
+    .select("savings_plan_id, amount")
+    .eq("household_id", householdId)
+    .not("savings_plan_id", "is", null);
+
+  for (const row of linkedTxRaw ?? []) {
+    const pid = String((row as { savings_plan_id: string }).savings_plan_id);
+    const a = (row as { amount: string | number }).amount;
+    const n = typeof a === "string" ? Number.parseFloat(a) : Number(a);
+    if (!Number.isFinite(n)) continue;
+    savedByPlan.set(pid, (savedByPlan.get(pid) ?? 0) + Math.abs(n));
+  }
+
   const asOf = new Date();
   const rows: SavingsPlanWithProgress[] = (plansRaw ?? []).map((raw) => {
     const plan = mapSavingsPlan(raw);

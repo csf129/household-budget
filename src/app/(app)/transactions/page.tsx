@@ -18,6 +18,7 @@ import {
 } from "@/lib/map-plaid-transaction-feed";
 import { mapTransactionRow } from "@/lib/map-transaction";
 import { mapCategoryRowFromSupabase } from "@/lib/category-display";
+import { fetchSavingsPlansWithProgress } from "@/lib/fetch-savings-plans";
 import type { AccountRow, CategoryRow, TransactionRow } from "@/types/finance";
 
 export default async function TransactionsPage() {
@@ -56,6 +57,10 @@ export default async function TransactionsPage() {
   }));
 
   const ledgerArchiveColumn = await ledgerArchiveColumnExists(supabase);
+
+  const { rows: plans } = await fetchSavingsPlansWithProgress(supabase, household.householdId, {
+    includeArchived: false,
+  });
 
   const { data: transactions, error: txError } =
     await fetchAllHouseholdTransactions(supabase, household.householdId, {
@@ -182,6 +187,7 @@ export default async function TransactionsPage() {
       accounts={accountRows}
       defaultAccountId={defaultAccountId}
       ledgerArchiveColumnAvailable={ledgerArchiveColumn}
+      plans={plans}
     />
   );
 }
