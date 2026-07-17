@@ -3,47 +3,71 @@
 import { useTheme } from "next-themes";
 import { useEffect, useState } from "react";
 
-export function ThemeToggle() {
-  const { theme, setTheme } = useTheme();
+type Props = {
+  className?: string;
+};
+
+/** Sun/moon icon button. Shows the theme you'll get when you click it. */
+export function ThemeToggle({ className = "" }: Props) {
+  const { resolvedTheme, setTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
     setMounted(true);
   }, []);
 
+  const base =
+    "inline-flex h-9 w-9 items-center justify-center rounded-lg text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100";
+
+  // Server render and first client paint can't know the theme; keep the slot stable.
   if (!mounted) {
-    return (
-      <div
-        className="h-10 w-56 animate-pulse rounded-lg bg-zinc-200 dark:bg-zinc-800"
-        aria-hidden
-      />
-    );
+    return <div className={`${base} ${className}`} aria-hidden />;
   }
 
-  const btn = (t: "light" | "dark" | "system", label: string) => (
-    <button
-      key={t}
-      type="button"
-      onClick={() => setTheme(t)}
-      className={`rounded-md px-3 py-2 text-xs font-semibold ${
-        theme === t
-          ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900"
-          : "text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"
-      }`}
-    >
-      {label}
-    </button>
-  );
+  const isDark = resolvedTheme === "dark";
+  const next = isDark ? "light" : "dark";
 
   return (
-    <div
-      className="inline-flex flex-wrap gap-1 rounded-lg border border-zinc-200 bg-zinc-50 p-1 dark:border-zinc-700 dark:bg-zinc-900/60"
-      role="group"
-      aria-label="Color theme"
+    <button
+      type="button"
+      onClick={() => setTheme(next)}
+      className={`${base} ${className}`}
+      title={isDark ? "Switch to light mode" : "Switch to dark mode"}
+      aria-label={isDark ? "Switch to light mode" : "Switch to dark mode"}
     >
-      {btn("light", "Light")}
-      {btn("dark", "Dark")}
-      {btn("system", "System")}
-    </div>
+      {isDark ? (
+        <svg
+          className="h-5 w-5"
+          xmlns="http://www.w3.org/2000/svg"
+          fill="none"
+          viewBox="0 0 24 24"
+          strokeWidth={1.5}
+          stroke="currentColor"
+          aria-hidden
+        >
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            d="M12 3v2.25m6.364.386-1.591 1.591M21 12h-2.25m-.386 6.364-1.591-1.591M12 18.75V21m-4.773-4.227-1.591 1.591M5.25 12H3m4.227-4.773L5.636 5.636M15.75 12a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0Z"
+          />
+        </svg>
+      ) : (
+        <svg
+          className="h-5 w-5"
+          xmlns="http://www.w3.org/2000/svg"
+          fill="none"
+          viewBox="0 0 24 24"
+          strokeWidth={1.5}
+          stroke="currentColor"
+          aria-hidden
+        >
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            d="M21.752 15.002A9.72 9.72 0 0 1 18 15.75c-5.385 0-9.75-4.365-9.75-9.75 0-1.33.266-2.597.748-3.752A9.753 9.753 0 0 0 3 11.25C3 16.635 7.365 21 12.75 21a9.753 9.753 0 0 0 9.002-5.998Z"
+          />
+        </svg>
+      )}
+    </button>
   );
 }

@@ -8,7 +8,8 @@ import {
 import type { IncomeRuleRow } from "@/lib/apply-income-rules";
 import { fetchAllHouseholdPlaidFeedRows } from "@/lib/fetch-household-plaid-feed";
 import { createClient } from "@/lib/supabase/server";
-import { getHouseholdForUser } from "@/lib/household";
+import { getHouseholdForUser, isHead } from "@/lib/household";
+import { getViewContext } from "@/lib/view-as";
 import {
   buildSavingsProjection,
   type ProjectionLine,
@@ -47,6 +48,8 @@ export default async function DashboardPage() {
 
   const household = await getHouseholdForUser(supabase, user.id);
   if (!household) return null;
+
+  const view = await getViewContext(supabase, household.role);
 
   await supabase.rpc("ensure_default_categories_for_my_household");
 
@@ -277,14 +280,15 @@ export default async function DashboardPage() {
           </ul>
         </section>
 
-        {household.role === "owner" ? (
+        {isHead(view.effectiveRole) ? (
           <HouseholdInvitePanel initialCode={household.inviteCode} />
         ) : (
           <section className="rounded-xl border border-zinc-200 bg-white p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-900 dark:shadow-black/30">
-            <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Your role</h2>
+            <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Your level</h2>
             <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">
-              You joined as a member. Ask the owner if you need a new invite
-              code for someone else.
+              You&apos;re a family member, so you can use everything except
+              settings. Ask a household head if you need an invite code for
+              someone else or a change to your access.
             </p>
           </section>
         )}

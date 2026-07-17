@@ -1,6 +1,6 @@
 import { SettingsGeneralPanel } from "@/components/settings-general-panel";
 import { createClient } from "@/lib/supabase/server";
-import { getHouseholdForUser } from "@/lib/household";
+import { fetchHouseholdMembers, getHouseholdForUser } from "@/lib/household";
 import type { AccountRow } from "@/types/finance";
 
 export default async function SettingsGeneralPage() {
@@ -13,11 +13,14 @@ export default async function SettingsGeneralPage() {
   const household = await getHouseholdForUser(supabase, user.id);
   if (!household) return null;
 
-  const { data: accountsRaw, error } = await supabase
-    .from("accounts")
-    .select("id, name")
-    .eq("household_id", household.householdId)
-    .order("name", { ascending: true });
+  const [members, { data: accountsRaw, error }] = await Promise.all([
+    fetchHouseholdMembers(supabase),
+    supabase
+      .from("accounts")
+      .select("id, name")
+      .eq("household_id", household.householdId)
+      .order("name", { ascending: true }),
+  ]);
 
   if (error) {
     return (
@@ -36,7 +39,8 @@ export default async function SettingsGeneralPage() {
     <SettingsGeneralPanel
       householdId={household.householdId}
       householdName={household.name}
-      isOwner={household.role === "owner"}
+      currentUserId={user.id}
+      initialMembers={members}
       initialAccounts={accounts}
     />
   );

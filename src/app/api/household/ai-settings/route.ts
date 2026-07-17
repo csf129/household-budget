@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { getHouseholdForUser } from "@/lib/household";
+import { getHouseholdForUser, isHead } from "@/lib/household";
+import { getViewContext } from "@/lib/view-as";
 import { AI_MODELS, DEFAULT_AI_MODEL_ID } from "@/lib/ai-models";
 
 const ALLOWED_MODEL_IDS = new Set(AI_MODELS.map((m) => m.id));
@@ -29,6 +30,13 @@ export async function PUT(request: Request) {
 
   const household = await getHouseholdForUser(supabase, user.id);
   if (!household) return NextResponse.json({ error: "No household." }, { status: 403 });
+  const view = await getViewContext(supabase, household.role);
+  if (!isHead(view.effectiveRole)) {
+    return NextResponse.json(
+      { error: "Only a household head can change settings." },
+      { status: 403 },
+    );
+  }
 
   let body: { modelId?: string } = {};
   try {

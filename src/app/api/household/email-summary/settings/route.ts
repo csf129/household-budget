@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { getHouseholdForUser } from "@/lib/household";
+import { getHouseholdForUser, isHead } from "@/lib/household";
+import { getViewContext } from "@/lib/view-as";
 import type { EmailSummarySettings, SummaryFrequency } from "@/types/email-summary";
 
 const VALID_FREQUENCIES: SummaryFrequency[] = ["weekly", "monthly", "quarterly"];
@@ -67,6 +68,13 @@ export async function PUT(req: Request) {
 
   const household = await getHouseholdForUser(supabase, user.id);
   if (!household) return NextResponse.json({ error: "No household" }, { status: 403 });
+  const view = await getViewContext(supabase, household.role);
+  if (!isHead(view.effectiveRole)) {
+    return NextResponse.json(
+      { error: "Only a household head can change settings." },
+      { status: 403 },
+    );
+  }
 
   const body = (await req.json()) as Partial<EmailSummarySettings>;
 

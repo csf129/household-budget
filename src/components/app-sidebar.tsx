@@ -4,6 +4,9 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useState } from "react";
 import { SignOutButton } from "@/components/sign-out-button";
+import { ThemeToggle } from "@/components/theme-toggle";
+import { ViewAsPanel } from "@/components/view-as-panel";
+import { HOUSEHOLD_ROLE_LABELS, type HouseholdMember, type HouseholdRole } from "@/lib/household";
 
 const nav = [
   { href: "/dashboard", label: "Overview" },
@@ -11,7 +14,7 @@ const nav = [
   { href: "/plans", label: "Plans" },
   { href: "/credit-cards", label: "Credit Cards" },
   { href: "/alerts", label: "Alerts & Messages" },
-  { href: "/settings/general", label: "Settings" },
+  { href: "/settings/general", label: "Settings", headOnly: true },
 ] as const;
 
 type NavHref = (typeof nav)[number]["href"];
@@ -25,11 +28,33 @@ function isActiveNav(href: string, pathname: string): boolean {
 type Props = {
   householdName: string;
   userEmail: string;
+  /** Heads see every section; family members don't get Settings. Reflects the effective view. */
+  isHead: boolean;
+  /** Level being rendered — the view override when one is active, otherwise the real level. */
+  effectiveRole: HouseholdRole;
+  /** Display name shown in the footer, when viewing as a specific user. */
+  effectiveLabel: string | null;
+  /** Only creators get the switcher. */
+  canSwitchViews: boolean;
+  realRole: HouseholdRole;
+  viewingAsMemberId: string | null;
+  members: HouseholdMember[];
   /** Badge counts keyed by nav href. Shown as pill next to the label. */
   badgeCounts?: Partial<Record<NavHref, number>>;
 };
 
-export function AppSidebar({ householdName, userEmail, badgeCounts = {} }: Props) {
+export function AppSidebar({
+  householdName,
+  userEmail,
+  isHead,
+  effectiveRole,
+  effectiveLabel,
+  canSwitchViews,
+  realRole,
+  viewingAsMemberId,
+  members,
+  badgeCounts = {},
+}: Props) {
   const pathname = usePathname();
   const router = useRouter();
   const [syncing, setSyncing] = useState(false);
@@ -81,6 +106,7 @@ export function AppSidebar({ householdName, userEmail, badgeCounts = {} }: Props
 
       <nav className="flex flex-col gap-0.5 p-3" aria-label="App sections">
         {nav.map((item) => {
+          if ("headOnly" in item && item.headOnly && !isHead) return null;
           const active = isActiveNav(item.href, pathname);
           const badge = badgeCounts[item.href] ?? 0;
           return (
@@ -104,7 +130,37 @@ export function AppSidebar({ householdName, userEmail, badgeCounts = {} }: Props
         })}
       </nav>
 
-      <div className="mt-auto space-y-2 border-t border-zinc-100 p-3 dark:border-zinc-800">
+      {canSwitchViews ? (
+        <div className="mt-auto">
+          <ViewAsPanel
+            realRole={realRole}
+            effectiveRole={effectiveRole}
+            viewingAsMemberId={viewingAsMemberId}
+            members={members}
+          />
+        </div>
+      ) : null}
+
+      <div
+        className={`${canSwitchViews ? "" : "mt-auto"} space-y-2 border-t border-zinc-100 p-3 dark:border-zinc-800`}
+      >
+        <div className="flex items-center gap-2 px-1 pb-1">
+          <span
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-xs font-bold text-emerald-900 dark:bg-emerald-950/60 dark:text-emerald-100"
+            aria-hidden
+          >
+            {(effectiveLabel ?? userEmail).charAt(0).toUpperCase()}
+          </span>
+          <span className="min-w-0">
+            <span className="block truncate text-xs font-semibold text-zinc-800 dark:text-zinc-200">
+              {effectiveLabel ?? userEmail}
+            </span>
+            <span className="block truncate text-[10px] text-zinc-500 dark:text-zinc-400">
+              {HOUSEHOLD_ROLE_LABELS[effectiveRole]}
+            </span>
+          </span>
+        </div>
+
         <button
           type="button"
           onClick={() => void handleSync()}
@@ -141,7 +197,10 @@ export function AppSidebar({ householdName, userEmail, badgeCounts = {} }: Props
         >
           Home
         </Link>
-        <SignOutButton className="w-full border-zinc-200 py-2.5 text-zinc-600 hover:text-zinc-900 dark:border-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-100" />
+        <div className="flex items-center gap-2">
+          <SignOutButton className="min-w-0 flex-1 border-zinc-200 py-2.5 text-zinc-600 hover:text-zinc-900 dark:border-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-100" />
+          <ThemeToggle className="shrink-0" />
+        </div>
       </div>
     </aside>
   );
