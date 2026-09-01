@@ -6,7 +6,7 @@
     },
     {
       "path": "/api/cron/hearth-sync",
-      "schedule": "0 */6 * * *"
+      "schedule": "0 6 * * *"
     }
   ]
 }
