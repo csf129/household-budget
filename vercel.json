@@ -3,6 +3,10 @@
     {
       "path": "/api/cron/email-summary",
       "schedule": "0 8 * * *"
+    },
+    {
+      "path": "/api/cron/hearth-sync",
+      "schedule": "0 */6 * * *"
     }
   ]
 }
