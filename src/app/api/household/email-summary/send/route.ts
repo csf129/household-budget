@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { Resend } from "resend";
 import { createClient } from "@/lib/supabase/server";
-import { getHouseholdForUser } from "@/lib/household";
+import { requireHouseholdHead } from "@/lib/api-auth";
 import { fetchEmailSummaryData } from "@/lib/fetch-summary-data";
 import { buildSummaryEmail } from "@/lib/email-summary-template";
 import type { SummaryPeriod, SummarySections } from "@/types/email-summary";
@@ -14,11 +14,9 @@ function getResend() {
 
 export async function POST(req: Request) {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
-  const household = await getHouseholdForUser(supabase, user.id);
-  if (!household) return NextResponse.json({ error: "No household" }, { status: 403 });
+  const auth = await requireHouseholdHead(supabase);
+  if (auth instanceof NextResponse) return auth;
+  const { household } = auth;
 
   const body = (await req.json()) as {
     period?: SummaryPeriod;
@@ -28,16 +26,36 @@ export async function POST(req: Request) {
 
   const period: SummaryPeriod = body.period ?? "month";
 
-  // Load saved settings to get recipients + sections (overridable from request body)
+  // Load saved settings to get recipients + sections.
   const { data: savedRow } = await supabase
     .from("email_summary_settings")
     .select("*")
     .eq("household_id", household.householdId)
     .maybeSingle();
 
-  const recipients: string[] =
-    body.recipients ??
-    (Array.isArray(savedRow?.recipients) ? (savedRow!.recipients as string[]) : []);
+  const savedRecipients: string[] = Array.isArray(savedRow?.recipients)
+    ? (savedRow!.recipients as string[])
+    : [];
+
+  // A caller may narrow the send to a subset of the saved recipients, but never
+  // add new addresses: the request body must not become a way to email the
+  // household's finances to an arbitrary address (data exfiltration / open
+  // relay). Anything not already in the saved allow-list is rejected.
+  const savedSet = new Set(savedRecipients.map((r) => r.trim().toLowerCase()));
+  let recipients: string[];
+  if (Array.isArray(body.recipients)) {
+    const requested = body.recipients.filter((r) => typeof r === "string");
+    const disallowed = requested.filter((r) => !savedSet.has(r.trim().toLowerCase()));
+    if (disallowed.length > 0) {
+      return NextResponse.json(
+        { error: "Recipients must be configured in email summary settings first." },
+        { status: 400 },
+      );
+    }
+    recipients = requested;
+  } else {
+    recipients = savedRecipients;
+  }
 
   if (recipients.length === 0) {
     return NextResponse.json({ error: "No recipients configured" }, { status: 400 });

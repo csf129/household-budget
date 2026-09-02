@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { isAuthorizedCronRequest } from "@/lib/cron-auth";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createHearthAdminClient } from "@/lib/hearth-client";
 import { computeHearthRollup } from "@/lib/hearth-rollup";
@@ -19,8 +20,7 @@ import { pushHearthRollup } from "@/lib/push-hearth-rollup";
  * Everything else stays out of Hearth: no accounts, no Plaid, no transactions.
  */
 export async function GET(req: Request) {
-  const authHeader = req.headers.get("authorization");
-  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
+  if (!isAuthorizedCronRequest(req)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 401 });
   }
 

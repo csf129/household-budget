@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { getHouseholdForUser } from "@/lib/household";
+import { requireHouseholdHead } from "@/lib/api-auth";
 import type { CreditCardMetadataInput, CreditCardStatus } from "@/types/credit-card";
 
 const VALID_STATUS: CreditCardStatus[] = ["active", "review", "cancelled"];
@@ -39,13 +39,9 @@ export async function PUT(request: Request) {
   }
 
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
-
-  const household = await getHouseholdForUser(supabase, user.id);
-  if (!household) return NextResponse.json({ error: "No household." }, { status: 403 });
+  const auth = await requireHouseholdHead(supabase);
+  if (auth instanceof NextResponse) return auth;
+  const { household } = auth;
 
   // Verify the bank account belongs to this household and is a credit card.
   const { data: acct, error: acctErr } = await supabase

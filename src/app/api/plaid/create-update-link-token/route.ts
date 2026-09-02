@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { CountryCode, Products } from "plaid";
 import { decryptPlaidAccessToken } from "@/lib/plaid-token-crypto";
-import { getHouseholdForUser } from "@/lib/household";
+import { requireHouseholdHead } from "@/lib/api-auth";
 import { createPlaidClient, getPlaidWebhookUrl } from "@/lib/plaid-server";
 import { createClient } from "@/lib/supabase/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
@@ -28,20 +28,9 @@ export async function POST(request: Request) {
   }
 
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) {
-    return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
-  }
-
-  const household = await getHouseholdForUser(supabase, user.id);
-  if (!household) {
-    return NextResponse.json(
-      { error: "Join or create a household first." },
-      { status: 403 },
-    );
-  }
+  const auth = await requireHouseholdHead(supabase);
+  if (auth instanceof NextResponse) return auth;
+  const { user, household } = auth;
 
   const admin = createSupabaseAdminClient();
   const { data: conn, error: connErr } = await admin
