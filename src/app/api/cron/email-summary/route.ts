@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { Resend } from "resend";
+import { isAuthorizedCronRequest } from "@/lib/cron-auth";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { fetchEmailSummaryData } from "@/lib/fetch-summary-data";
 import { buildSummaryEmail } from "@/lib/email-summary-template";
@@ -24,8 +25,7 @@ function frequencyToPeriod(frequency: SummaryFrequency): SummaryPeriod {
 }
 
 export async function GET(req: Request) {
-  const authHeader = req.headers.get("authorization");
-  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
+  if (!isAuthorizedCronRequest(req)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 401 });
   }
 
