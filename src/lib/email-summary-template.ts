@@ -58,12 +58,28 @@ function fmt(n: number): string {
   }).format(n);
 }
 
+/**
+ * Escape any user-controlled value before it goes into the email HTML.
+ * Category names, transaction descriptions, card names, and AI-generated text
+ * are all attacker-influenceable and land in HTML (some inside style="..."
+ * attributes), so they must be escaped to prevent HTML/attribute injection —
+ * phishing links, tracking pixels, or content spoofing in the sent email.
+ */
+function esc(value: unknown): string {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 function progressBar(pct: number, color = "#6d28d9"): string {
   const clamped = Math.min(100, Math.max(0, pct));
   const barColor = pct > 100 ? "#dc2626" : color;
   return `
     <div style="background:#f4f4f5;border-radius:4px;height:8px;overflow:hidden;margin-top:4px;">
-      <div style="background:${barColor};height:8px;width:${clamped}%;border-radius:4px;"></div>
+      <div style="background:${esc(barColor)};height:8px;width:${clamped}%;border-radius:4px;"></div>
     </div>`;
 }
 
@@ -107,8 +123,8 @@ export function buildSummaryEmail(data: SummaryData): string {
       .filter(Boolean)
       .map((line) =>
         line.startsWith("•")
-          ? `<p style="margin:6px 0;font-size:13px;color:#18181b;padding-left:4px;">• ${line.slice(1).trim()}</p>`
-          : `<p style="margin:8px 0 2px;font-size:13px;color:#18181b;">${line}</p>`,
+          ? `<p style="margin:6px 0;font-size:13px;color:#18181b;padding-left:4px;">• ${esc(line.slice(1).trim())}</p>`
+          : `<p style="margin:8px 0 2px;font-size:13px;color:#18181b;">${esc(line)}</p>`,
       )
       .join("");
     body += `
@@ -155,7 +171,7 @@ export function buildSummaryEmail(data: SummaryData): string {
         <div style="margin-bottom:10px;">
           <table width="100%" cellpadding="0" cellspacing="0">
             <tr>
-              <td style="font-size:13px;color:#18181b;">${row.name}</td>
+              <td style="font-size:13px;color:#18181b;">${esc(row.name)}</td>
               <td align="right" style="font-size:13px;font-weight:600;color:#18181b;white-space:nowrap;">${fmt(row.amount)}</td>
             </tr>
           </table>
@@ -176,7 +192,7 @@ export function buildSummaryEmail(data: SummaryData): string {
         <div style="margin-bottom:12px;">
           <table width="100%" cellpadding="0" cellspacing="0">
             <tr>
-              <td style="font-size:13px;color:#18181b;">${row.name}</td>
+              <td style="font-size:13px;color:#18181b;">${esc(row.name)}</td>
               <td align="right" style="font-size:12px;color:${over ? "#dc2626" : "#71717a"};white-space:nowrap;">
                 ${fmt(row.spent)} / ${fmt(row.budget)}
               </td>
@@ -198,8 +214,8 @@ export function buildSummaryEmail(data: SummaryData): string {
       body += `
         <tr>
           <td style="padding:8px 0;border-bottom:1px solid #f4f4f5;vertical-align:top;">
-            <p style="margin:0;font-size:13px;color:#18181b;">${tx.normalized_description}</p>
-            <p style="margin:2px 0 0;font-size:11px;color:#71717a;">${tx.occurred_on}${tx.category ? ` · ${tx.category}` : ""}</p>
+            <p style="margin:0;font-size:13px;color:#18181b;">${esc(tx.normalized_description)}</p>
+            <p style="margin:2px 0 0;font-size:11px;color:#71717a;">${esc(tx.occurred_on)}${tx.category ? ` · ${esc(tx.category)}` : ""}</p>
           </td>
           <td align="right" style="padding:8px 0;border-bottom:1px solid #f4f4f5;vertical-align:top;white-space:nowrap;">
             <p style="margin:0;font-size:13px;font-weight:600;color:#18181b;">${fmt(Math.abs(tx.amount))}</p>
@@ -243,7 +259,7 @@ export function buildSummaryEmail(data: SummaryData): string {
         <div style="margin-bottom:12px;">
           <table width="100%" cellpadding="0" cellspacing="0">
             <tr>
-              <td style="font-size:13px;color:#18181b;">${plan.name}</td>
+              <td style="font-size:13px;color:#18181b;">${esc(plan.name)}</td>
               <td align="right" style="font-size:12px;color:#71717a;white-space:nowrap;">
                 ${fmt(plan.saved)} / ${fmt(plan.target)} (${Math.round(pct)}%)
               </td>
@@ -273,8 +289,8 @@ export function buildSummaryEmail(data: SummaryData): string {
       body += `
         <tr>
           <td style="padding:8px 0;border-bottom:1px solid #f4f4f5;vertical-align:top;">
-            <p style="margin:0;font-size:13px;color:#18181b;font-weight:600;">${r.cardName}</p>
-            <p style="margin:2px 0 0;font-size:12px;color:${accent};">${label} · ${r.date}</p>
+            <p style="margin:0;font-size:13px;color:#18181b;font-weight:600;">${esc(r.cardName)}</p>
+            <p style="margin:2px 0 0;font-size:12px;color:${accent};">${label} · ${esc(r.date)}</p>
           </td>
         </tr>`;
     }
@@ -286,7 +302,7 @@ export function buildSummaryEmail(data: SummaryData): string {
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>${householdName} — ${periodLabel} Summary</title>
+  <title>${esc(householdName)} — ${esc(periodLabel)} Summary</title>
 </head>
 <body style="margin:0;padding:0;background:#fafafa;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
   <table width="100%" cellpadding="0" cellspacing="0" style="background:#fafafa;padding:32px 16px;">
@@ -296,8 +312,8 @@ export function buildSummaryEmail(data: SummaryData): string {
         <!-- Header -->
         <tr><td style="background:#18181b;padding:28px 32px;">
           <p style="margin:0;font-size:13px;font-weight:600;color:#a1a1aa;letter-spacing:.06em;text-transform:uppercase;">Household Budget</p>
-          <p style="margin:6px 0 0;font-size:22px;font-weight:700;color:#ffffff;">${householdName}</p>
-          <p style="margin:4px 0 0;font-size:14px;color:#71717a;">${periodLabel} Summary</p>
+          <p style="margin:6px 0 0;font-size:22px;font-weight:700;color:#ffffff;">${esc(householdName)}</p>
+          <p style="margin:4px 0 0;font-size:14px;color:#71717a;">${esc(periodLabel)} Summary</p>
         </td></tr>
 
         <!-- Body -->
@@ -310,7 +326,7 @@ export function buildSummaryEmail(data: SummaryData): string {
         <!-- Footer -->
         <tr><td style="background:#f4f4f5;padding:16px 32px;border-top:1px solid #e4e4e7;">
           <p style="margin:0;font-size:11px;color:#a1a1aa;text-align:center;">
-            You're receiving this because email summaries are enabled for ${householdName}.
+            You're receiving this because email summaries are enabled for ${esc(householdName)}.
           </p>
         </td></tr>
 

@@ -1,18 +1,40 @@
 import { NextResponse } from "next/server";
 import { createPlaidClient } from "@/lib/plaid-server";
+import { verifyPlaidWebhook } from "@/lib/plaid-webhook-verify";
 import { syncPlaidTransactionsForConnection } from "@/lib/plaid-sync";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
 export const maxDuration = 120;
 
 /**
- * Plaid webhooks (e.g. SYNC_UPDATES_AVAILABLE). No JWT: verify Plaid-Signature in production.
+ * Plaid webhooks (e.g. SYNC_UPDATES_AVAILABLE). Authenticated via the signed
+ * `Plaid-Verification` JWT — we read the raw body, verify the signature and the
+ * body hash, and reject anything unverified before doing any work.
  * @see https://plaid.com/docs/api/webhooks/webhook-verification/
  */
 export async function POST(request: Request) {
+  const rawBody = await request.text();
+
+  let plaid;
+  try {
+    plaid = createPlaidClient();
+  } catch (e) {
+    console.error("plaid webhook: client init", e);
+    return NextResponse.json({ ok: false }, { status: 500 });
+  }
+
+  const verified = await verifyPlaidWebhook(
+    plaid,
+    request.headers.get("plaid-verification"),
+    rawBody,
+  );
+  if (!verified) {
+    return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
+  }
+
   let payload: { item_id?: string; webhook_type?: string; webhook_code?: string };
   try {
-    payload = (await request.json()) as typeof payload;
+    payload = JSON.parse(rawBody) as typeof payload;
   } catch {
     return NextResponse.json({ ok: false }, { status: 400 });
   }
@@ -45,7 +67,6 @@ export async function POST(request: Request) {
   }
 
   try {
-    const plaid = createPlaidClient();
     await syncPlaidTransactionsForConnection(
       admin,
       plaid,

@@ -1,26 +1,34 @@
 import { NextResponse } from "next/server";
+import { isAuthorizedCronRequest } from "@/lib/cron-auth";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createHearthAdminClient } from "@/lib/hearth-client";
 import { computeHearthRollup } from "@/lib/hearth-rollup";
 import { pushHearthRollup } from "@/lib/push-hearth-rollup";
+import { createPlaidClient } from "@/lib/plaid-server";
+import { syncAllActivePlaidConnectionsForHousehold } from "@/lib/plaid-sync";
 
 /**
- * Push the budget rollup into the family's Hearth calendar.
+ * Daily maintenance: refresh Plaid transactions, then push the budget rollup
+ * into the family's Hearth calendar.
  *
- * Runs on a Vercel Cron a few times a day (see vercel.json) and can be invoked
- * by hand with the same `CRON_SECRET` bearer token. It reads this household's
- * categories and transactions with the service-role client, derives the
- * aggregate rollup (computeHearthRollup — the only thing that leaves this app),
- * and writes it into Hearth with Hearth's service-role client.
+ * Runs once a day on a Vercel Cron (see vercel.json) and can be invoked by hand
+ * with the same `CRON_SECRET` bearer token. It first runs a safety-net Plaid
+ * sync for this household's active connections (the webhook is the primary
+ * trigger; this backfills dropped/rejected deliveries), then reads categories
+ * and transactions with the service-role client, derives the aggregate rollup
+ * (computeHearthRollup — the only thing that leaves this app), and writes it
+ * into Hearth with Hearth's service-role client.
  *
  * Which household maps to which is one pair of env vars:
  *   BUDGET_HOUSEHOLD_ID  — the household here to summarise
  *   HEARTH_HOUSEHOLD_ID  — the Hearth household to write it to
- * Everything else stays out of Hearth: no accounts, no Plaid, no transactions.
+ * Nothing but the aggregate rollup ever leaves for Hearth: the Plaid sync only
+ * writes into this app's own tables; no accounts or transactions go to Hearth.
  */
+export const maxDuration = 120;
+
 export async function GET(req: Request) {
-  const authHeader = req.headers.get("authorization");
-  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
+  if (!isAuthorizedCronRequest(req)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 401 });
   }
 
@@ -35,6 +43,25 @@ export async function GET(req: Request) {
 
   try {
     const admin = createSupabaseAdminClient();
+
+    // Safety net: the Plaid webhook is the primary sync trigger, but if a
+    // delivery is dropped or rejected, transactions would silently stop
+    // arriving. Backfill active connections once a day here so the rollup below
+    // reflects fresh data. Non-fatal — a Plaid failure must not block Hearth.
+    let plaidSync: Awaited<
+      ReturnType<typeof syncAllActivePlaidConnectionsForHousehold>
+    > | null = null;
+    try {
+      const plaid = createPlaidClient();
+      plaidSync = await syncAllActivePlaidConnectionsForHousehold(
+        admin,
+        plaid,
+        budgetHouseholdId,
+      );
+    } catch (e) {
+      console.error("[cron] hearth-sync: Plaid safety-net sync failed", e);
+    }
+
     const rollup = await computeHearthRollup(admin, budgetHouseholdId);
 
     const hearth = createHearthAdminClient();
@@ -42,6 +69,7 @@ export async function GET(req: Request) {
 
     return NextResponse.json({
       ok: true,
+      plaid_sync: plaidSync,
       as_of: rollup.as_of,
       week: { budget: rollup.week.budget, spent: rollup.week.spent },
       month: { budget: rollup.month.budget, spent: rollup.month.spent },
