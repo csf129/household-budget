@@ -68,6 +68,7 @@ export async function POST(request: Request) {
         plaid,
         row.id,
         row.household_id,
+        { deadlineMs: 50_000 },
       );
       return NextResponse.json({ connections: 1, ...result });
     } catch (e) {
@@ -89,17 +90,27 @@ export async function POST(request: Request) {
   let upserted = 0;
   let removed = 0;
   let ledger_replaced = 0;
+  let has_more = false;
+  const startedAt = Date.now();
+  const budgetMs = 50_000; // stay under the platform function timeout
   for (const c of conns ?? []) {
+    const remaining = budgetMs - (Date.now() - startedAt);
+    if (remaining <= 0) {
+      has_more = true;
+      break;
+    }
     try {
       const r = await syncPlaidTransactionsForConnection(
         admin,
         plaid,
         c.id,
         c.household_id,
+        { deadlineMs: remaining },
       );
       upserted += r.upserted;
       removed += r.removed;
       ledger_replaced += r.ledger_replaced;
+      if (r.has_more) has_more = true;
     } catch (e) {
       console.error("Plaid sync connection", c.id, e);
     }
@@ -110,5 +121,6 @@ export async function POST(request: Request) {
     upserted,
     removed,
     ledger_replaced,
+    has_more,
   });
 }

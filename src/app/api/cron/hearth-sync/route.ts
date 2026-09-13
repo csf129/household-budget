@@ -57,6 +57,9 @@ export async function GET(req: Request) {
         admin,
         plaid,
         budgetHouseholdId,
+        // Leave headroom under the 60s function cap for the Hearth rollup+push
+        // below; any remaining backfill resumes on the next run.
+        { deadlineMs: 40_000 },
       );
     } catch (e) {
       console.error("[cron] hearth-sync: Plaid safety-net sync failed", e);

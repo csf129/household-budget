@@ -42,11 +42,15 @@ export async function syncPlaidTransactionsForConnection(
   plaid: PlaidApi,
   bankConnectionId: string,
   householdId: string,
+  opts: { deadlineMs?: number } = {},
 ): Promise<{
   upserted: number;
   removed: number;
   ledger_replaced: number;
+  has_more: boolean;
 }> {
+  const startedAt = Date.now();
+  const deadlineMs = opts.deadlineMs;
   const { data: sec, error: secErr } = await admin
     .from("bank_connection_secrets")
     .select("plaid_access_token_ciphertext")
@@ -196,6 +200,14 @@ export async function syncPlaidTransactionsForConnection(
     if (curErr) throw new Error(curErr.message);
 
     if (!hasMore) break;
+
+    // Stay under the platform function timeout (Vercel Hobby hard-caps at 60s
+    // regardless of maxDuration). The cursor is saved after every page, so a
+    // full historical backfill resumes on the next sync (webhook, cron, manual)
+    // instead of being killed mid-request and surfacing as a "network error".
+    if (deadlineMs != null && Date.now() - startedAt > deadlineMs) {
+      break;
+    }
   }
 
   await admin
@@ -205,6 +217,13 @@ export async function syncPlaidTransactionsForConnection(
       updated_at: new Date().toISOString(),
     })
     .eq("id", bankConnectionId);
+
+  // When we stopped early there is still more to pull; skip the whole-household
+  // reconciliation/repair passes (they are heavy) and let them run on the sync
+  // that finishes the backfill.
+  if (hasMore) {
+    return { upserted, removed, ledger_replaced: ledgerReplaced, has_more: true };
+  }
 
   // Self-heal any feed row that never got a ledger row (transient supersede
   // failure, aborted/partial sync). Runs before the near-duplicate repair so
@@ -227,7 +246,7 @@ export async function syncPlaidTransactionsForConnection(
     console.warn("[plaid] repairNearDuplicatePlaidLedgerPairsForHousehold", e);
   }
 
-  return { upserted, removed, ledger_replaced: ledgerReplaced };
+  return { upserted, removed, ledger_replaced: ledgerReplaced, has_more: false };
 }
 
 /**
@@ -240,13 +259,16 @@ export async function syncAllActivePlaidConnectionsForHousehold(
   admin: SupabaseClient,
   plaid: PlaidApi,
   householdId: string,
+  opts: { deadlineMs?: number } = {},
 ): Promise<{
   connections: number;
   synced: number;
   upserted: number;
   removed: number;
   ledger_replaced: number;
+  has_more: boolean;
 }> {
+  const startedAt = Date.now();
   const { data: conns, error } = await admin
     .from("bank_connections")
     .select("id")
@@ -258,18 +280,30 @@ export async function syncAllActivePlaidConnectionsForHousehold(
   let upserted = 0;
   let removed = 0;
   let ledgerReplaced = 0;
+  let hasMore = false;
   for (const c of conns ?? []) {
+    const remaining =
+      opts.deadlineMs != null
+        ? opts.deadlineMs - (Date.now() - startedAt)
+        : undefined;
+    // Out of time budget — leave the rest for the next run (all resumable).
+    if (remaining != null && remaining <= 0) {
+      hasMore = true;
+      break;
+    }
     try {
       const r = await syncPlaidTransactionsForConnection(
         admin,
         plaid,
         String(c.id),
         householdId,
+        remaining != null ? { deadlineMs: remaining } : {},
       );
       synced += 1;
       upserted += r.upserted;
       removed += r.removed;
       ledgerReplaced += r.ledger_replaced;
+      if (r.has_more) hasMore = true;
     } catch (e) {
       console.error("[plaid] safety-net sync failed for connection", c.id, e);
     }
@@ -281,5 +315,6 @@ export async function syncAllActivePlaidConnectionsForHousehold(
     upserted,
     removed,
     ledger_replaced: ledgerReplaced,
+    has_more: hasMore,
   };
 }
