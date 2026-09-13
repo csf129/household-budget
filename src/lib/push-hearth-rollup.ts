@@ -82,6 +82,8 @@ export async function pushHearthRollup(
       current_balance: a.current_balance,
       available_balance: a.available_balance,
       currency: a.currency,
+      institution: a.institution,
+      institution_url: a.institution_url,
       sort_order: i,
     }));
     const { error } = await hearth.from("finance_accounts").insert(rows);

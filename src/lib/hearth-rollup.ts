@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { CountryCode, type PlaidApi } from "plaid";
 
 import { fetchAllHouseholdTransactions } from "@/lib/fetch-household-transactions";
 import { mapTransactionRow } from "@/lib/map-transaction";
@@ -76,6 +77,10 @@ export type RollupAccount = {
   current_balance: number | null;
   available_balance: number | null;
   currency: string;
+  // The parent institution (bank/issuer) and its website, so Hearth can group
+  // accounts and link straight to sign-in. Null when unknown.
+  institution: string | null;
+  institution_url: string | null;
 };
 
 const pad2 = (n: number) => String(n).padStart(2, "0");
@@ -113,6 +118,7 @@ function spentInRange(txs: TransactionRow[], start: string, end: string): number
 export async function computeHearthRollup(
   supabase: SupabaseClient,
   householdId: string,
+  plaid?: PlaidApi,
 ): Promise<HearthRollup> {
   const now = new Date();
   const y = now.getFullYear();
@@ -123,7 +129,7 @@ export async function computeHearthRollup(
   const monthEnd = isoDate(y, m, lastDayOfMonth(y, m));
 
   // --- load categories, primary groups, accounts, and every transaction ----
-  const [catResult, pgResult, acctResult, ruleResult] = await Promise.all([
+  const [catResult, pgResult, acctResult, ruleResult, connResult] = await Promise.all([
     supabase
       .from("categories")
       .select(
@@ -137,7 +143,7 @@ export async function computeHearthRollup(
     supabase
       .from("bank_accounts")
       .select(
-        "name,display_name,mask,type,subtype,current_balance,available_balance,iso_currency_code",
+        "name,display_name,mask,type,subtype,current_balance,available_balance,iso_currency_code,bank_connection_id",
       )
       .eq("household_id", householdId)
       .order("type", { ascending: true })
@@ -146,23 +152,65 @@ export async function computeHearthRollup(
       .from("income_classification_rules")
       .select("match_type,pattern,priority,treatment,amount_sign")
       .eq("household_id", householdId),
+    supabase
+      .from("bank_connections")
+      .select("id,institution_id,institution_name")
+      .eq("household_id", householdId),
   ]);
 
   // Income rules mirror what the dashboard's income bar uses; the columns
   // selected above are exactly IncomeRuleRow.
   const incomeRules = (ruleResult.data ?? []) as IncomeRuleRow[];
 
+  // Each account's parent institution, from its bank connection. Kept as a map
+  // by connection id (name) and a set of the distinct Plaid institution ids so
+  // we look up each institution's website at most once below.
+  const connById = new Map<string, { name: string | null; instId: string | null }>();
+  for (const c of connResult.data ?? []) {
+    connById.set(String(c.id), {
+      name: c.institution_name != null ? String(c.institution_name) : null,
+      instId: c.institution_id != null ? String(c.institution_id) : null,
+    });
+  }
+  // Institution website (homepage), looked up from Plaid once per institution.
+  // Best-effort: a Plaid hiccup or a missing url just leaves the link absent.
+  const urlByInstId = new Map<string, string | null>();
+  if (plaid) {
+    const ids = [...new Set(
+      [...connById.values()].map((c) => c.instId).filter((x): x is string => !!x),
+    )];
+    await Promise.all(ids.map(async (instId) => {
+      try {
+        const res = await plaid.institutionsGetById({
+          institution_id: instId,
+          country_codes: [CountryCode.Us],
+          options: { include_optional_metadata: true },
+        });
+        urlByInstId.set(instId, res.data.institution.url ?? null);
+      } catch {
+        urlByInstId.set(instId, null);
+      }
+    }));
+  }
+
   // The linked-account balances Hearth shows. A nickname wins over the raw
-  // Plaid name; only display fields and balances cross over.
-  const accounts: RollupAccount[] = (acctResult.data ?? []).map((a) => ({
-    name: String(a.display_name ?? "").trim() || String(a.name ?? "Account"),
-    mask: a.mask != null ? String(a.mask) : null,
-    account_type: a.type != null ? String(a.type) : null,
-    account_subtype: a.subtype != null ? String(a.subtype) : null,
-    current_balance: a.current_balance != null ? round2(a.current_balance) : null,
-    available_balance: a.available_balance != null ? round2(a.available_balance) : null,
-    currency: String(a.iso_currency_code ?? "USD") || "USD",
-  }));
+  // Plaid name; only display fields, balances and the institution cross over.
+  const accounts: RollupAccount[] = (acctResult.data ?? []).map((a) => {
+    const conn = a.bank_connection_id ? connById.get(String(a.bank_connection_id)) : undefined;
+    const institution = conn?.name ?? null;
+    const institution_url = conn?.instId ? (urlByInstId.get(conn.instId) ?? null) : null;
+    return {
+      name: String(a.display_name ?? "").trim() || String(a.name ?? "Account"),
+      mask: a.mask != null ? String(a.mask) : null,
+      account_type: a.type != null ? String(a.type) : null,
+      account_subtype: a.subtype != null ? String(a.subtype) : null,
+      current_balance: a.current_balance != null ? round2(a.current_balance) : null,
+      available_balance: a.available_balance != null ? round2(a.available_balance) : null,
+      currency: String(a.iso_currency_code ?? "USD") || "USD",
+      institution,
+      institution_url,
+    };
+  });
 
   const categoryRows: CategoryRow[] = (catResult.data ?? []).map((c) =>
     mapCategoryRowFromSupabase(c),

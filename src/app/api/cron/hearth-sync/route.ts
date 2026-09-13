@@ -46,6 +46,16 @@ export async function GET(req: Request) {
   try {
     const admin = createSupabaseAdminClient();
 
+    // One Plaid client for both the safety-net sync and the institution-website
+    // lookup in the rollup. Non-fatal if unavailable: the rollup just omits the
+    // account links, the sync is skipped.
+    let plaid: ReturnType<typeof createPlaidClient> | null = null;
+    try {
+      plaid = createPlaidClient();
+    } catch (e) {
+      console.warn("[cron] hearth-sync: Plaid client unavailable", e);
+    }
+
     // Safety net: the Plaid webhook is the primary sync trigger, but if a
     // delivery is dropped or rejected, transactions would silently stop
     // arriving. Backfill active connections once a day here so the rollup below
@@ -53,18 +63,19 @@ export async function GET(req: Request) {
     let plaidSync: Awaited<
       ReturnType<typeof syncAllActivePlaidConnectionsForHousehold>
     > | null = null;
-    try {
-      const plaid = createPlaidClient();
-      plaidSync = await syncAllActivePlaidConnectionsForHousehold(
-        admin,
-        plaid,
-        budgetHouseholdId,
-        // Leave headroom under the 60s function cap for the Hearth rollup+push
-        // below; any remaining backfill resumes on the next run.
-        { deadlineMs: 40_000 },
-      );
-    } catch (e) {
-      console.error("[cron] hearth-sync: Plaid safety-net sync failed", e);
+    if (plaid) {
+      try {
+        plaidSync = await syncAllActivePlaidConnectionsForHousehold(
+          admin,
+          plaid,
+          budgetHouseholdId,
+          // Leave headroom under the 60s function cap for the Hearth rollup+push
+          // below; any remaining backfill resumes on the next run.
+          { deadlineMs: 40_000 },
+        );
+      } catch (e) {
+        console.error("[cron] hearth-sync: Plaid safety-net sync failed", e);
+      }
     }
 
     // AI-categorize anything still uncategorized (e.g. rows imported overnight
@@ -84,7 +95,7 @@ export async function GET(req: Request) {
       console.warn("[cron] hearth-sync: auto-categorize failed (non-fatal)", e);
     }
 
-    const rollup = await computeHearthRollup(admin, budgetHouseholdId);
+    const rollup = await computeHearthRollup(admin, budgetHouseholdId, plaid ?? undefined);
 
     const hearth = createHearthAdminClient();
     await pushHearthRollup(hearth, hearthHouseholdId, rollup);
