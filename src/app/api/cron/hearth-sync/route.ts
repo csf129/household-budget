@@ -6,6 +6,8 @@ import { computeHearthRollup } from "@/lib/hearth-rollup";
 import { pushHearthRollup } from "@/lib/push-hearth-rollup";
 import { createPlaidClient } from "@/lib/plaid-server";
 import { syncAllActivePlaidConnectionsForHousehold } from "@/lib/plaid-sync";
+import { autoCategorizeUncategorizedForHousehold } from "@/lib/auto-categorize-household";
+import { getHouseholdAiModel } from "@/lib/get-household-ai-model";
 
 /**
  * Daily maintenance: refresh Plaid transactions, then push the budget rollup
@@ -65,6 +67,23 @@ export async function GET(req: Request) {
       console.error("[cron] hearth-sync: Plaid safety-net sync failed", e);
     }
 
+    // AI-categorize anything still uncategorized (e.g. rows imported overnight
+    // by a Plaid webhook, which does not run the categorizer itself). Runs
+    // before the rollup so the summary reflects fresh categories. Best-effort:
+    // a missing AI key or model error must not block the Hearth push below.
+    let categorized = 0;
+    try {
+      const modelId = await getHouseholdAiModel(admin, budgetHouseholdId);
+      const r = await autoCategorizeUncategorizedForHousehold(
+        admin,
+        budgetHouseholdId,
+        modelId,
+      );
+      categorized = r.updated;
+    } catch (e) {
+      console.warn("[cron] hearth-sync: auto-categorize failed (non-fatal)", e);
+    }
+
     const rollup = await computeHearthRollup(admin, budgetHouseholdId);
 
     const hearth = createHearthAdminClient();
@@ -73,11 +92,13 @@ export async function GET(req: Request) {
     return NextResponse.json({
       ok: true,
       plaid_sync: plaidSync,
+      categorized,
       as_of: rollup.as_of,
       week: { budget: rollup.week.budget, spent: rollup.week.spent },
       month: { budget: rollup.month.budget, spent: rollup.month.spent },
       categories: rollup.categories.length,
       trend_months: rollup.trend.length,
+      accounts: rollup.accounts.length,
     });
   } catch (err) {
     return NextResponse.json(

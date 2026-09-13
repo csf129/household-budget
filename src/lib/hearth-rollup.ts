@@ -36,6 +36,7 @@ export type HearthRollup = {
   month: PeriodTotals;
   categories: RollupCategory[];
   trend: TrendPoint[];
+  accounts: RollupAccount[];
 };
 
 type PeriodTotals = {
@@ -56,6 +57,21 @@ export type RollupCategory = {
 };
 
 type TrendPoint = { month: string; budget: number; spent: number };
+
+/**
+ * One linked bank/card account's display balance. No account number, no Plaid
+ * token, no transactions — only what Hearth needs to show "where things stand":
+ * a name, the last four of the mask, the type, and the two balances Plaid gives.
+ */
+export type RollupAccount = {
+  name: string;
+  mask: string | null;
+  account_type: string | null;
+  account_subtype: string | null;
+  current_balance: number | null;
+  available_balance: number | null;
+  currency: string;
+};
 
 const pad2 = (n: number) => String(n).padStart(2, "0");
 const round2 = (n: number) => Math.round((Number(n) || 0) * 100) / 100;
@@ -101,8 +117,8 @@ export async function computeHearthRollup(
   const monthStart = isoDate(y, m, 1);
   const monthEnd = isoDate(y, m, lastDayOfMonth(y, m));
 
-  // --- load categories, primary groups, and every transaction --------------
-  const [catResult, pgResult] = await Promise.all([
+  // --- load categories, primary groups, accounts, and every transaction ----
+  const [catResult, pgResult, acctResult] = await Promise.all([
     supabase
       .from("categories")
       .select(
@@ -113,7 +129,27 @@ export async function computeHearthRollup(
       .from("primary_category_groups")
       .select("id,name,slug,color,sort_order")
       .eq("household_id", householdId),
+    supabase
+      .from("bank_accounts")
+      .select(
+        "name,display_name,mask,type,subtype,current_balance,available_balance,iso_currency_code",
+      )
+      .eq("household_id", householdId)
+      .order("type", { ascending: true })
+      .order("name", { ascending: true }),
   ]);
+
+  // The linked-account balances Hearth shows. A nickname wins over the raw
+  // Plaid name; only display fields and balances cross over.
+  const accounts: RollupAccount[] = (acctResult.data ?? []).map((a) => ({
+    name: String(a.display_name ?? "").trim() || String(a.name ?? "Account"),
+    mask: a.mask != null ? String(a.mask) : null,
+    account_type: a.type != null ? String(a.type) : null,
+    account_subtype: a.subtype != null ? String(a.subtype) : null,
+    current_balance: a.current_balance != null ? round2(a.current_balance) : null,
+    available_balance: a.available_balance != null ? round2(a.available_balance) : null,
+    currency: String(a.iso_currency_code ?? "USD") || "USD",
+  }));
 
   const categoryRows: CategoryRow[] = (catResult.data ?? []).map((c) =>
     mapCategoryRowFromSupabase(c),
@@ -245,5 +281,6 @@ export async function computeHearthRollup(
     },
     categories,
     trend,
+    accounts,
   };
 }
