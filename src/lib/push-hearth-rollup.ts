@@ -24,10 +24,12 @@ export async function pushHearthRollup(
         week_end: rollup.week.end,
         week_budget: rollup.week.budget,
         week_spent: rollup.week.spent,
+        week_income: rollup.week.income,
         month_start: rollup.month.start,
         month_end: rollup.month.end,
         month_budget: rollup.month.budget,
         month_spent: rollup.month.spent,
+        month_income: rollup.month.income,
         updated_at: new Date().toISOString(),
       },
       { onConflict: "household_id" },
@@ -61,6 +63,7 @@ export async function pushHearthRollup(
       period_month: p.month,
       budget: p.budget,
       spent: p.spent,
+      income: p.income,
     }));
     const { error } = await hearth.from("finance_trend").insert(rows);
     if (error) throw new Error(`finance_trend: ${error.message}`);

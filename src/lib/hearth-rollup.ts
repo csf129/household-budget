@@ -7,7 +7,11 @@ import {
   mapCategoryRowFromSupabase,
 } from "@/lib/category-display";
 import { attachPrimaryGroupsFromCategoryCatalog } from "@/lib/attach-primary-group-to-transactions";
-import { aggregateCategorySpendingInRange } from "@/lib/dashboard-analytics";
+import {
+  aggregateCategorySpendingInRange,
+  totalsForBucket,
+} from "@/lib/dashboard-analytics";
+import type { IncomeRuleRow } from "@/lib/apply-income-rules";
 import {
   budgetDailyPortionForDate,
   effectiveMonthlyBudgetForCalendarMonth,
@@ -44,6 +48,7 @@ type PeriodTotals = {
   end: string;
   budget: number;
   spent: number;
+  income: number;
 };
 
 export type RollupCategory = {
@@ -56,7 +61,7 @@ export type RollupCategory = {
   week_spent: number;
 };
 
-type TrendPoint = { month: string; budget: number; spent: number };
+type TrendPoint = { month: string; budget: number; spent: number; income: number };
 
 /**
  * One linked bank/card account's display balance. No account number, no Plaid
@@ -118,7 +123,7 @@ export async function computeHearthRollup(
   const monthEnd = isoDate(y, m, lastDayOfMonth(y, m));
 
   // --- load categories, primary groups, accounts, and every transaction ----
-  const [catResult, pgResult, acctResult] = await Promise.all([
+  const [catResult, pgResult, acctResult, ruleResult] = await Promise.all([
     supabase
       .from("categories")
       .select(
@@ -137,7 +142,15 @@ export async function computeHearthRollup(
       .eq("household_id", householdId)
       .order("type", { ascending: true })
       .order("name", { ascending: true }),
+    supabase
+      .from("income_classification_rules")
+      .select("match_type,pattern,priority,treatment,amount_sign")
+      .eq("household_id", householdId),
   ]);
+
+  // Income rules mirror what the dashboard's income bar uses; the columns
+  // selected above are exactly IncomeRuleRow.
+  const incomeRules = (ruleResult.data ?? []) as IncomeRuleRow[];
 
   // The linked-account balances Hearth shows. A nickname wins over the raw
   // Plaid name; only display fields and balances cross over.
@@ -249,9 +262,14 @@ export async function computeHearthRollup(
   const monthBudgetTotal = totalEffectiveMonthlyBudgetForCalendarMonth(categoryRows, y, m);
   const weekBudgetTotal = categories.reduce((s, c) => s + c.week_budget, 0);
 
-  // --- trailing six months for the patterns chart -------------------------
+  // Income for a date range, the same figure the dashboard's income bar uses.
+  const incomeInRange = (start: string, end: string): number =>
+    totalsForBucket(txs, { key: start, label: start, start, end }, { incomeRules }).income;
+
+  // --- trailing twelve months for the patterns chart ----------------------
+  // Twelve so the chart matches the budget app's Overview (a full year of bars).
   const trend: TrendPoint[] = [];
-  for (let back = 5; back >= 0; back--) {
+  for (let back = 11; back >= 0; back--) {
     const dt = new Date(y, m - 1 - back, 1);
     const ty = dt.getFullYear();
     const tm = dt.getMonth() + 1;
@@ -261,6 +279,7 @@ export async function computeHearthRollup(
       month: `${ty}-${pad2(tm)}-01`,
       budget: round2(totalEffectiveMonthlyBudgetForCalendarMonth(categoryRows, ty, tm)),
       spent: round2(spentInRange(txs, tStart, tEnd)),
+      income: round2(incomeInRange(tStart, tEnd)),
     });
   }
 
@@ -272,12 +291,14 @@ export async function computeHearthRollup(
       end: week.end,
       budget: round2(weekBudgetTotal),
       spent: round2(spentInRange(txs, week.start, week.end)),
+      income: round2(incomeInRange(week.start, week.end)),
     },
     month: {
       start: monthStart,
       end: monthEnd,
       budget: round2(monthBudgetTotal),
       spent: round2(spentInRange(txs, monthStart, monthEnd)),
+      income: round2(incomeInRange(monthStart, monthEnd)),
     },
     categories,
     trend,
