@@ -72,6 +72,9 @@ export async function POST(request: Request) {
       plaid,
       row.id,
       row.household_id,
+      // Stay under the platform timeout; Plaid re-delivers/So the next webhook
+      // (or the daily cron) resumes any remaining backfill from the saved cursor.
+      { deadlineMs: 50_000 },
     );
   } catch (e) {
     console.error("plaid webhook sync", itemId, e);

@@ -233,13 +233,19 @@ export async function POST(request: Request) {
     { onConflict: "bank_connection_id" },
   );
 
-  let syncResult = { upserted: 0, removed: 0 };
+  // Sync as much as fits under the platform timeout; the cursor is saved per
+  // page, so the rest of the historical backfill resumes via the webhook, the
+  // daily cron, or a manual sync. Without this bound a large item (e.g. Chase,
+  // ~2 years) exceeds Vercel's 60s function cap and the relink fails with a
+  // "network error" even though Plaid Link succeeded.
+  let syncResult = { upserted: 0, removed: 0, has_more: false };
   try {
     syncResult = await syncPlaidTransactionsForConnection(
       admin,
       plaid,
       connectionId,
       household.householdId,
+      { deadlineMs: 45_000 },
     );
   } catch (e) {
     console.error("Initial Plaid sync failed:", e);
@@ -249,5 +255,6 @@ export async function POST(request: Request) {
     bank_connection_id: connectionId,
     accounts: accounts.length,
     ...syncResult,
+    backfill_in_progress: syncResult.has_more,
   });
 }

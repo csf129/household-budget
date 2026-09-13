@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { AiAssistantWidget } from "@/components/ai-assistant-widget";
 import { AppSidebar } from "@/components/app-sidebar";
+import { AutoBankSync } from "@/components/auto-bank-sync";
 import { ViewAsBanner } from "@/components/view-as-banner";
 import { createClient } from "@/lib/supabase/server";
 import { fetchHouseholdMembers, getHouseholdForUser, isHead } from "@/lib/household";
@@ -56,6 +57,7 @@ export default async function AppLayout({
         <div className="px-4 py-8">{children}</div>
       </div>
       <AiAssistantWidget />
+      <AutoBankSync />
     </div>
   );
 }

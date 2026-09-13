@@ -65,4 +65,23 @@ export async function pushHearthRollup(
     const { error } = await hearth.from("finance_trend").insert(rows);
     if (error) throw new Error(`finance_trend: ${error.message}`);
   }
+
+  // Accounts — replace this household's set, so an account unlinked in the
+  // budget app disappears from Hearth rather than lingering.
+  await hearth.from("finance_accounts").delete().eq("household_id", hearthHouseholdId);
+  if (rollup.accounts.length) {
+    const rows = rollup.accounts.map((a, i) => ({
+      household_id: hearthHouseholdId,
+      name: a.name,
+      mask: a.mask,
+      account_type: a.account_type,
+      account_subtype: a.account_subtype,
+      current_balance: a.current_balance,
+      available_balance: a.available_balance,
+      currency: a.currency,
+      sort_order: i,
+    }));
+    const { error } = await hearth.from("finance_accounts").insert(rows);
+    if (error) throw new Error(`finance_accounts: ${error.message}`);
+  }
 }
