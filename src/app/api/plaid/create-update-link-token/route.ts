@@ -70,6 +70,11 @@ export async function POST(request: Request) {
       products: [Products.Transactions],
       access_token: accessToken,
       transactions: { days_requested: 730 },
+      // Let the user re-select which accounts are shared. Without this, update
+      // mode only re-authenticates and cannot re-add an account the bank has
+      // stopped sharing (e.g. a BofA checking account that dropped off the
+      // item), so its transactions never come back.
+      update: { account_selection_enabled: true },
       ...(webhook ? { webhook } : {}),
     });
 

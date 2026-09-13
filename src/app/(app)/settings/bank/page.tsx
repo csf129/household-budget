@@ -39,6 +39,15 @@ export default async function SettingsBankPage() {
 
   const connError = connErr?.message || acctErr?.message || txCountErr?.message;
 
+  // Only surface the server-env reminder when something is actually missing —
+  // otherwise it reads as an error on a correctly configured deployment.
+  const encKey = process.env.PLAID_TOKEN_ENCRYPTION_KEY?.trim() ?? "";
+  const missingServerEnv =
+    !process.env.SUPABASE_SERVICE_ROLE_KEY?.trim() ||
+    !process.env.PLAID_CLIENT_ID?.trim() ||
+    !process.env.PLAID_SECRET?.trim() ||
+    encKey.length !== 64;
+
   return (
     <div className="space-y-8">
       <section className="rounded-xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-900 dark:shadow-black/30">
@@ -144,6 +153,7 @@ export default async function SettingsBankPage() {
 
       <PlaidManualDedupePanel />
 
+      {missingServerEnv ? (
       <section className="rounded-xl border border-amber-200 bg-amber-50/80 p-4 text-xs text-amber-950 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-100">
         <p className="font-medium">Server environment</p>
         <p className="mt-1">
@@ -166,6 +176,7 @@ export default async function SettingsBankPage() {
           . Never expose the service role or Plaid secret to the browser.
         </p>
       </section>
+      ) : null}
     </div>
   );
 }
