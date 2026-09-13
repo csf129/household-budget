@@ -4,6 +4,7 @@ import { categoryRulesFromDb } from "@/lib/apply-category-rules";
 import { decryptPlaidAccessToken } from "@/lib/plaid-token-crypto";
 import { parsePlaidDate } from "@/lib/plaid-parse-date";
 import { repairNearDuplicatePlaidLedgerPairsForHousehold } from "@/lib/plaid-ledger-near-duplicate-merge";
+import { promoteUnmirroredPlaidFeedRowsToLedger } from "@/lib/promote-unmirrored-plaid-feed";
 import { supersedeImportedTransactionsForPlaidTransaction } from "@/lib/plaid-supersede-imported";
 
 function transactionToRow(
@@ -144,14 +145,26 @@ export async function syncPlaidTransactionsForConnection(
       for (const t of synced) {
         const bankAccountId = plaidToInternal.get(t.account_id);
         if (!bankAccountId) continue;
-        const r = await supersedeImportedTransactionsForPlaidTransaction(
-          admin,
-          householdId,
-          t,
-          categoryRules,
-          bankAccountId,
-        );
-        ledgerReplaced += r.deleted;
+        // Isolate per-transaction failures: one bad row must not abort the whole
+        // batch (which previously stranded its siblings with no ledger row once
+        // the cursor advanced). Anything skipped here is healed by the
+        // reconciliation pass after the loop.
+        try {
+          const r = await supersedeImportedTransactionsForPlaidTransaction(
+            admin,
+            householdId,
+            t,
+            categoryRules,
+            bankAccountId,
+          );
+          ledgerReplaced += r.deleted;
+        } catch (e) {
+          console.error(
+            "[plaid] supersede failed for transaction",
+            t.transaction_id,
+            e,
+          );
+        }
       }
 
       // Plaid may return both the old pending id and the new posted id in one batch.
@@ -192,6 +205,21 @@ export async function syncPlaidTransactionsForConnection(
       updated_at: new Date().toISOString(),
     })
     .eq("id", bankConnectionId);
+
+  // Self-heal any feed row that never got a ledger row (transient supersede
+  // failure, aborted/partial sync). Runs before the near-duplicate repair so
+  // the repair can collapse anything this re-inserts.
+  try {
+    const { inserted } =
+      await promoteUnmirroredPlaidFeedRowsToLedger(admin, householdId);
+    if (inserted > 0) {
+      console.warn(
+        `[plaid] reconciliation promoted ${inserted} un-mirrored feed row(s) to the ledger`,
+      );
+    }
+  } catch (e) {
+    console.warn("[plaid] promoteUnmirroredPlaidFeedRowsToLedger", e);
+  }
 
   try {
     await repairNearDuplicatePlaidLedgerPairsForHousehold(admin, householdId);
