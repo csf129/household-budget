@@ -66,33 +66,53 @@ function timingSafeEqualStr(a: string, b: string): boolean {
   return timingSafeEqual(ab, bb);
 }
 
+/**
+ * Reject with a logged reason. The verifier fails closed, so a silent `false`
+ * used to make a broken auto-sync indistinguishable from an attack. Logging the
+ * specific reason (visible in Vercel logs) is safe — the JWT is Plaid's, not a
+ * user secret — and turns "transactions silently stopped" into a diagnosable
+ * event. Reasons are coarse-grained on purpose: enough to triage, nothing that
+ * would help forge a token.
+ */
+function reject(reason: string): false {
+  console.warn(`[plaid] webhook verification rejected: ${reason}`);
+  return false;
+}
+
 export async function verifyPlaidWebhook(
   plaid: PlaidApi,
   verificationHeader: string | null,
   rawBody: string,
 ): Promise<boolean> {
-  if (!verificationHeader) return false;
+  if (!verificationHeader) return reject("missing Plaid-Verification header");
 
   const parts = verificationHeader.split(".");
-  if (parts.length !== 3) return false;
+  if (parts.length !== 3) return reject("header is not a 3-part JWT");
   const [headerB64, payloadB64, signatureB64] = parts;
 
   let header: { alg?: string; kid?: string };
   try {
     header = JSON.parse(Buffer.from(headerB64, "base64url").toString("utf8"));
   } catch {
-    return false;
+    return reject("JWT header is not valid base64url JSON");
   }
-  if (header.alg !== "ES256" || !header.kid) return false;
+  if (header.alg !== "ES256" || !header.kid) {
+    return reject(`unexpected JWT header (alg=${header.alg}, kid set=${!!header.kid})`);
+  }
 
   const jwk = await getVerificationJwk(plaid, header.kid);
-  if (!jwk) return false;
+  if (!jwk) {
+    return reject(
+      `no usable verification key for kid=${header.kid} ` +
+        "(key fetch failed, revoked, or Plaid env/credentials mismatch)",
+    );
+  }
 
   let publicKey;
   try {
     publicKey = createPublicKey({ key: jwk, format: "jwk" });
   } catch {
-    return false;
+    return reject(`could not import verification key for kid=${header.kid}`);
   }
 
   // JWS signatures are raw r||s (IEEE P1363), not DER.
@@ -107,22 +127,32 @@ export async function verifyPlaidWebhook(
       signature,
     );
   } catch {
-    return false;
+    return reject("signature verification threw");
   }
-  if (!signatureValid) return false;
+  if (!signatureValid) return reject("JWS signature did not match");
 
   let payload: { iat?: number; request_body_sha256?: string };
   try {
     payload = JSON.parse(Buffer.from(payloadB64, "base64url").toString("utf8"));
   } catch {
-    return false;
+    return reject("JWT payload is not valid base64url JSON");
   }
 
-  if (typeof payload.iat !== "number") return false;
+  if (typeof payload.iat !== "number") return reject("JWT payload has no numeric iat");
   const nowSec = Math.floor(Date.now() / 1000);
-  if (Math.abs(nowSec - payload.iat) > MAX_IAT_SKEW_SEC) return false;
+  const skew = nowSec - payload.iat;
+  if (Math.abs(skew) > MAX_IAT_SKEW_SEC) {
+    return reject(
+      `iat outside ±${MAX_IAT_SKEW_SEC}s window (skew=${skew}s; check server clock)`,
+    );
+  }
 
-  if (typeof payload.request_body_sha256 !== "string") return false;
+  if (typeof payload.request_body_sha256 !== "string") {
+    return reject("JWT payload has no request_body_sha256");
+  }
   const bodyHash = createHash("sha256").update(rawBody, "utf8").digest("hex");
-  return timingSafeEqualStr(bodyHash, payload.request_body_sha256);
+  if (!timingSafeEqualStr(bodyHash, payload.request_body_sha256)) {
+    return reject("body hash did not match pinned request_body_sha256");
+  }
+  return true;
 }

@@ -201,3 +201,57 @@ export async function syncPlaidTransactionsForConnection(
 
   return { upserted, removed, ledger_replaced: ledgerReplaced };
 }
+
+/**
+ * Sync every active Plaid connection for a household. Used as a daily safety
+ * net (see the hearth-sync cron): the Plaid webhook is the primary trigger, but
+ * if a webhook is dropped or rejected, this backfills so data cannot silently
+ * freeze. One failing connection is logged and skipped, not fatal.
+ */
+export async function syncAllActivePlaidConnectionsForHousehold(
+  admin: SupabaseClient,
+  plaid: PlaidApi,
+  householdId: string,
+): Promise<{
+  connections: number;
+  synced: number;
+  upserted: number;
+  removed: number;
+  ledger_replaced: number;
+}> {
+  const { data: conns, error } = await admin
+    .from("bank_connections")
+    .select("id")
+    .eq("household_id", householdId)
+    .eq("status", "active");
+  if (error) throw new Error(error.message);
+
+  let synced = 0;
+  let upserted = 0;
+  let removed = 0;
+  let ledgerReplaced = 0;
+  for (const c of conns ?? []) {
+    try {
+      const r = await syncPlaidTransactionsForConnection(
+        admin,
+        plaid,
+        String(c.id),
+        householdId,
+      );
+      synced += 1;
+      upserted += r.upserted;
+      removed += r.removed;
+      ledgerReplaced += r.ledger_replaced;
+    } catch (e) {
+      console.error("[plaid] safety-net sync failed for connection", c.id, e);
+    }
+  }
+
+  return {
+    connections: (conns ?? []).length,
+    synced,
+    upserted,
+    removed,
+    ledger_replaced: ledgerReplaced,
+  };
+}
