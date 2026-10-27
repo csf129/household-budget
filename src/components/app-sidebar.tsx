@@ -90,9 +90,12 @@ export function AppSidebar({
       <div className="flex flex-col gap-1 border-b border-zinc-100 p-4 dark:border-zinc-800">
         <Link
           href="/dashboard"
-          className="text-lg font-semibold tracking-tight text-zinc-900 dark:text-zinc-100"
+          className="flex items-center gap-2 text-lg font-semibold tracking-tight text-zinc-900 dark:text-zinc-100"
+          style={{ fontFamily: 'Georgia, "Times New Roman", serif' }}
         >
-          Household budget
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/icon.svg" alt="" width={24} height={24} className="h-6 w-6 rounded-md" />
+          Steward
         </Link>
         <p className="text-xs leading-snug text-zinc-500 dark:text-zinc-400">
           <span className="block truncate font-medium text-zinc-600 dark:text-zinc-300">

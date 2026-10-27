@@ -16,7 +16,7 @@ export default async function Home() {
       <div className="flex flex-1 flex-col items-center justify-center bg-zinc-50 px-6 py-16 font-sans dark:bg-zinc-950">
         <main className="w-full max-w-lg rounded-2xl border border-zinc-200 bg-white p-8 shadow-sm dark:border-zinc-800 dark:bg-zinc-900 dark:shadow-black/30">
           <h1 className="text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
-            Household budget
+            Steward
           </h1>
           <p className="mt-3 text-pretty text-zinc-600 dark:text-zinc-400">
             You are signed in as{" "}
@@ -67,7 +67,7 @@ export default async function Home() {
     <div className="flex flex-1 flex-col items-center justify-center bg-zinc-50 px-6 py-16 font-sans dark:bg-zinc-950">
       <main className="w-full max-w-lg rounded-2xl border border-zinc-200 bg-white p-8 shadow-sm dark:border-zinc-800 dark:bg-zinc-900 dark:shadow-black/30">
         <h1 className="text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
-          Household budget
+          Steward
         </h1>
         <p className="mt-3 text-pretty text-zinc-600 dark:text-zinc-400">
           Shared spending and categories for you and your partner. Create an

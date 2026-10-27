@@ -1,4 +1,4 @@
-# Household budget
+# Steward
 
 Shared budgeting and spending tracker for two people, built with [Next.js](https://nextjs.org) and [Supabase](https://supabase.com). The goal is a Chase Track & Plan–style experience: categories, rules from corrections, and dashboards on phone and desktop (PWA-friendly responsive UI).
 

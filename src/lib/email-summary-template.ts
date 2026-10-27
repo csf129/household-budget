@@ -311,7 +311,7 @@ export function buildSummaryEmail(data: SummaryData): string {
 
         <!-- Header -->
         <tr><td style="background:#18181b;padding:28px 32px;">
-          <p style="margin:0;font-size:13px;font-weight:600;color:#a1a1aa;letter-spacing:.06em;text-transform:uppercase;">Household Budget</p>
+          <p style="margin:0;font-size:13px;font-weight:600;color:#a1a1aa;letter-spacing:.06em;text-transform:uppercase;">Steward</p>
           <p style="margin:6px 0 0;font-size:22px;font-weight:700;color:#ffffff;">${esc(householdName)}</p>
           <p style="margin:4px 0 0;font-size:14px;color:#71717a;">${esc(periodLabel)} Summary</p>
         </td></tr>
