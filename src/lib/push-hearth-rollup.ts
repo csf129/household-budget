@@ -84,6 +84,8 @@ export async function pushHearthRollup(
       currency: a.currency,
       institution: a.institution,
       institution_url: a.institution_url,
+      last_payment_amount: a.last_payment_amount,
+      last_payment_on: a.last_payment_on,
       sort_order: i,
     }));
     const { error } = await hearth.from("finance_accounts").insert(rows);

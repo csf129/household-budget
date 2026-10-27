@@ -1,4 +1,5 @@
 import { DashboardOverviewCharts } from "@/components/dashboard-overview-charts";
+import { DashboardCreditCards } from "@/components/dashboard-credit-cards";
 import { DashboardPlansSummary } from "@/components/dashboard-plans-summary";
 import { HouseholdInvitePanel } from "@/components/household-invite-panel";
 import {
@@ -6,6 +7,8 @@ import {
   resolveCategoryFromRules,
 } from "@/lib/apply-category-rules";
 import type { IncomeRuleRow } from "@/lib/apply-income-rules";
+import { fetchCreditCards } from "@/lib/fetch-credit-cards";
+import { fetchLastCardPayments } from "@/lib/credit-card-last-payment";
 import { fetchAllHouseholdPlaidFeedRows } from "@/lib/fetch-household-plaid-feed";
 import { createClient } from "@/lib/supabase/server";
 import { getHouseholdForUser, isHead } from "@/lib/household";
@@ -189,6 +192,13 @@ export default async function DashboardPage() {
     }),
   }));
 
+  const { rows: creditCards } = await fetchCreditCards(supabase, household.householdId);
+  const lastCardPayments = await fetchLastCardPayments(
+    supabase,
+    household.householdId,
+    creditCards.map((c) => c.id),
+  );
+
   const { rows: savingsPlanSummaries, error: plansErr } =
     await fetchSavingsPlansWithProgress(supabase, household.householdId, {
       includeArchived: false,
@@ -232,6 +242,8 @@ export default async function DashboardPage() {
         incomeRules={incomeRules}
         bankAccounts={overviewBankAccounts}
       />
+
+      <DashboardCreditCards cards={creditCards} lastPayments={lastCardPayments} />
 
       {plansErr ? (
         plansErr.toLowerCase().includes("savings_plans") ? (

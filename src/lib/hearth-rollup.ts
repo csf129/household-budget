@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { CountryCode, type PlaidApi } from "plaid";
 
+import { fetchLastCardPayments } from "@/lib/credit-card-last-payment";
 import { fetchAllHouseholdTransactions } from "@/lib/fetch-household-transactions";
 import { mapTransactionRow } from "@/lib/map-transaction";
 import {
@@ -81,6 +82,10 @@ export type RollupAccount = {
   // accounts and link straight to sign-in. Null when unknown.
   institution: string | null;
   institution_url: string | null;
+  // Credit cards only: the most recent payment made toward the card. Null when
+  // the card has none in the synced history (and always null for other types).
+  last_payment_amount: number | null;
+  last_payment_on: string | null;
 };
 
 const pad2 = (n: number) => String(n).padStart(2, "0");
@@ -143,7 +148,7 @@ export async function computeHearthRollup(
     supabase
       .from("bank_accounts")
       .select(
-        "name,display_name,mask,type,subtype,current_balance,available_balance,iso_currency_code,bank_connection_id",
+        "id,name,display_name,mask,type,subtype,current_balance,available_balance,iso_currency_code,bank_connection_id",
       )
       .eq("household_id", householdId)
       .order("type", { ascending: true })
@@ -193,6 +198,11 @@ export async function computeHearthRollup(
     }));
   }
 
+  const creditIds = (acctResult.data ?? [])
+    .filter((a) => a.type === "credit")
+    .map((a) => String(a.id));
+  const lastPayments = await fetchLastCardPayments(supabase, householdId, creditIds);
+
   // The linked-account balances Hearth shows. A nickname wins over the raw
   // Plaid name; only display fields, balances and the institution cross over.
   const accounts: RollupAccount[] = (acctResult.data ?? []).map((a) => {
@@ -209,6 +219,8 @@ export async function computeHearthRollup(
       currency: String(a.iso_currency_code ?? "USD") || "USD",
       institution,
       institution_url,
+      last_payment_amount: lastPayments.get(String(a.id))?.amount ?? null,
+      last_payment_on: lastPayments.get(String(a.id))?.on ?? null,
     };
   });
 
