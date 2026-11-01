@@ -13,6 +13,7 @@ export function ThemeToggle({ className = "" }: Props) {
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional hydration guard: flip to mounted after first client render
     setMounted(true);
   }, []);
 

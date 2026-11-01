@@ -225,7 +225,7 @@ export function EmailSummarySettingsForm({ initial }: Props) {
           })}
         </div>
         {frequencies.length === 0 && (
-          <p className="mt-3 text-xs text-zinc-400 dark:text-zinc-500">No scheduled sends — use "Send Now" to send manually.</p>
+          <p className="mt-3 text-xs text-zinc-400 dark:text-zinc-500">No scheduled sends — use &quot;Send Now&quot; to send manually.</p>
         )}
       </section>
 

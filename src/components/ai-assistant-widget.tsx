@@ -365,8 +365,7 @@ export function AiAssistantWidget() {
           <div className="flex-1 space-y-3 overflow-y-auto px-3 py-3">
             {visibleMessages.length === 0 ? (
               <div className="rounded-lg border border-violet-200 bg-violet-50 p-3 text-xs text-violet-900 dark:border-violet-900/60 dark:bg-violet-950/40 dark:text-violet-100">
-                Try: "What are my top spending categories this month?",
-                "How should I set budgets?", or "How can I fund a $2,000 project by August?"
+                {'Try: "What are my top spending categories this month?", "How should I set budgets?", or "How can I fund a $2,000 project by August?"'}
               </div>
             ) : (
               visibleMessages.map((m) => (

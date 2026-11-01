@@ -123,6 +123,7 @@ export function SavingsProjectionPanel({ plans, householdId }: Props) {
     setActualByBucket(map);
   }, [householdId, lines, granularity, refreshKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- data-fetch effect: setState happens after the async fetch resolves
   useEffect(() => { void fetchActuals(); }, [fetchActuals]);
 
   // ── Row expansion / transaction picker ─────────────────────────
