@@ -12,14 +12,16 @@ export default function manifest(): MetadataRoute.Manifest {
     background_color: "#18181b",
     theme_color: "#18181b",
     icons: [
-      // SVG first, serving both normal and masked contexts (matches the
-      // setup that installs cleanly on mobile). PNGs below are fallbacks
-      // for browsers that don't accept SVG manifest icons.
+      // SVG first for a crisp install icon on browsers that accept it
+      // (matches the setup that installs cleanly on mobile). The PNGs below
+      // are fallbacks, and icon-maskable-512.png covers the maskable role.
+      // Next's typed manifest only allows a single purpose value, so no
+      // space-separated "any maskable" here.
       {
         src: "/icon.svg",
         sizes: "any",
         type: "image/svg+xml",
-        purpose: "any maskable",
+        purpose: "any",
       },
       {
         src: "/icon-192.png",
