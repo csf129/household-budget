@@ -133,7 +133,7 @@ async function callAnthropic(opts: {
   // 2026-10-21 API version) reject sampling params; default sampling is used.
   const body: Record<string, unknown> = {
     model: opts.modelId,
-    max_tokens: opts.maxTokens,
+    max_tokens: Math.max(opts.maxTokens, ANTHROPIC_MIN_MAX_TOKENS),
     messages: conversationMessages,
   };
   if (systemText) body.system = systemText;
@@ -268,7 +268,7 @@ async function streamAnthropic(opts: {
   const { systemText, conversationMessages } = splitSystemMessages(opts.messages);
   const body: Record<string, unknown> = {
     model: opts.modelId,
-    max_tokens: 1024,
+    max_tokens: ANTHROPIC_MIN_MAX_TOKENS,
     stream: true,
     messages: conversationMessages,
   };
@@ -362,6 +362,14 @@ export async function streamAi(opts: {
 
 const DEFAULT_TOOL_ROUNDS = 4;
 
+/**
+ * Minimum output budget for Anthropic requests. Current Claude models think by
+ * default and reasoning consumes output tokens, so too small a `max_tokens` can
+ * be spent entirely on thinking — leaving no answer text (an "empty response").
+ * Clamp every Anthropic call to this floor so no caller can starve the model.
+ */
+const ANTHROPIC_MIN_MAX_TOKENS = 4096;
+
 type ToolRunResult = { text: string; usage: TokenUsage };
 
 async function runToolImpl(
@@ -414,7 +422,7 @@ async function anthropicToolRounds(opts: {
     const lastRound = round === opts.maxRounds - 1;
     const body: Record<string, unknown> = {
       model: opts.modelId,
-      max_tokens: opts.maxTokens,
+      max_tokens: Math.max(opts.maxTokens, ANTHROPIC_MIN_MAX_TOKENS),
       messages: msgs,
     };
     if (systemText) body.system = systemText;

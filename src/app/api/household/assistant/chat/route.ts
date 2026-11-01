@@ -253,7 +253,9 @@ export async function POST(request: Request) {
       messages: promptMessages,
       tools,
       temperature: 0.2,
-      maxTokens: 1500,
+      // Headroom for thinking-on Claude models + the final answer (and for
+      // GPT-5/6 reasoning models, whose reasoning also counts toward this cap).
+      maxTokens: 4096,
     });
     text = result.text;
     usage = result.usage;
