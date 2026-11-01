@@ -1,20 +1,14 @@
--- Link ledger rows to Plaid bank_accounts for per-account analytics (e.g. signed transfer bars).
-
-alter table public.transactions
-  add column if not exists bank_account_id uuid references public.bank_accounts (id) on delete set null;
-
-create index if not exists transactions_bank_account_id_idx
-  on public.transactions (bank_account_id)
-  where bank_account_id is not null;
-
-comment on column public.transactions.bank_account_id is
-  'Plaid-linked bank_accounts row when the transaction came from sync; used for account-scoped reporting.';
-
--- Backfill from plaid_transactions for rows already mirrored to the ledger.
-update public.transactions t
-set bank_account_id = p.bank_account_id
-from public.plaid_transactions p
-where t.plaid_transaction_id is not null
-  and t.plaid_transaction_id = p.plaid_transaction_id
-  and t.household_id = p.household_id
-  and t.bank_account_id is null;
+-- NOTE: This migration is intentionally a no-op.
+--
+-- It originally added transactions.bank_account_id (referencing
+-- public.bank_accounts) and backfilled it from public.plaid_transactions.
+-- But bank_accounts / plaid_transactions are created in
+-- 20260414100000_plaid_bank_link.sql and transactions.plaid_transaction_id in
+-- 20260415120000_transactions_plaid_transaction_id.sql — all AFTER this file.
+-- On a clean apply (e.g. a Supabase preview branch) this ran too early and
+-- failed with: relation "public.bank_accounts" does not exist.
+--
+-- The logic now lives in 20260415130000_transactions_bank_account_id.sql, which
+-- runs after those dependencies exist. This file keeps its version so already
+-- migrated databases stay consistent; the real statements are idempotent, so
+-- re-running them from the new migration is harmless.

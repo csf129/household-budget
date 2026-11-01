@@ -67,6 +67,8 @@ const SEVERITY_STYLES = {
 
 const TYPE_LABELS: Record<AlertItem["type"], string> = {
   missing_receipt: "Missing receipt",
+  subscription_price_change: "Price change",
+  bill_paid: "Bill paid",
 };
 
 export function AlertsInbox({ alerts, householdId }: Props) {
@@ -245,6 +247,12 @@ export function AlertsInbox({ alerts, householdId }: Props) {
                       <dt className="text-zinc-500 dark:text-zinc-400">Date</dt>
                       <dd className="font-medium text-zinc-900 dark:text-zinc-100">{formatAlertDate(selected.date)}</dd>
                     </div>
+                    {selected.type === "subscription_price_change" && selected.previousAmount != null && (
+                      <div className="flex justify-between gap-4 px-4 py-2.5 text-sm">
+                        <dt className="text-zinc-500 dark:text-zinc-400">Previous price</dt>
+                        <dd className="font-medium text-zinc-900 dark:text-zinc-100">{formatUsd(selected.previousAmount)}</dd>
+                      </div>
+                    )}
                     {selected.categoryName && (
                       <div className="flex justify-between gap-4 px-4 py-2.5 text-sm">
                         <dt className="text-zinc-500 dark:text-zinc-400">Category</dt>
@@ -260,33 +268,54 @@ export function AlertsInbox({ alerts, householdId }: Props) {
                         </dd>
                       </div>
                     )}
-                    <div className="flex justify-between gap-4 px-4 py-2.5 text-sm">
-                      <dt className="text-zinc-500 dark:text-zinc-400">Business expense</dt>
-                      <dd className="font-medium text-emerald-700 dark:text-emerald-400">Yes</dd>
-                    </div>
+                    {selected.type === "missing_receipt" && (
+                      <div className="flex justify-between gap-4 px-4 py-2.5 text-sm">
+                        <dt className="text-zinc-500 dark:text-zinc-400">Business expense</dt>
+                        <dd className="font-medium text-emerald-700 dark:text-emerald-400">Yes</dd>
+                      </div>
+                    )}
                   </dl>
                 </section>
 
-                {/* What to do */}
-                <section className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 dark:border-amber-900/40 dark:bg-amber-950/30">
-                  <p className="text-sm font-medium text-amber-900 dark:text-amber-200">
-                    Receipt required for tax reporting
-                  </p>
-                  <p className="mt-1 text-sm text-amber-800 dark:text-amber-300/80">
-                    This transaction is marked as a business expense but has no receipt attached. Upload a receipt (image or PDF) from the transaction detail to ensure it&apos;s ready for tax time.
-                  </p>
-                </section>
+                {/* What to do / context */}
+                {selected.type === "missing_receipt" && (
+                  <>
+                    <section className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 dark:border-amber-900/40 dark:bg-amber-950/30">
+                      <p className="text-sm font-medium text-amber-900 dark:text-amber-200">
+                        Receipt required for tax reporting
+                      </p>
+                      <p className="mt-1 text-sm text-amber-800 dark:text-amber-300/80">
+                        This transaction is marked as a business expense but has no receipt attached. Upload a receipt (image or PDF) from the transaction detail to ensure it&apos;s ready for tax time.
+                      </p>
+                    </section>
+                    <Link
+                      href={`/transactions?highlight=${selected.transactionId}`}
+                      className="inline-flex items-center gap-2 rounded-lg bg-zinc-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-white"
+                    >
+                      <svg className="h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" aria-hidden>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
+                      </svg>
+                      Open transaction to upload receipt
+                    </Link>
+                  </>
+                )}
 
-                {/* Action */}
-                <Link
-                  href={`/transactions?highlight=${selected.transactionId}`}
-                  className="inline-flex items-center gap-2 rounded-lg bg-zinc-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-white"
-                >
-                  <svg className="h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" aria-hidden>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
-                  </svg>
-                  Open transaction to upload receipt
-                </Link>
+                {selected.type !== "missing_receipt" && (
+                  <>
+                    <section className="rounded-lg border border-zinc-200 bg-zinc-50 px-4 py-3 dark:border-zinc-700 dark:bg-zinc-800/40">
+                      <p className="text-sm text-zinc-700 dark:text-zinc-300">{selected.preview}</p>
+                    </section>
+                    <Link
+                      href="/transactions"
+                      className="inline-flex items-center gap-2 rounded-lg bg-zinc-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-white"
+                    >
+                      <svg className="h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" aria-hidden>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
+                      </svg>
+                      View transactions
+                    </Link>
+                  </>
+                )}
               </div>
             </div>
           </>
