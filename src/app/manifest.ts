@@ -12,6 +12,15 @@ export default function manifest(): MetadataRoute.Manifest {
     background_color: "#18181b",
     theme_color: "#18181b",
     icons: [
+      // SVG first, serving both normal and masked contexts (matches the
+      // setup that installs cleanly on mobile). PNGs below are fallbacks
+      // for browsers that don't accept SVG manifest icons.
+      {
+        src: "/icon.svg",
+        sizes: "any",
+        type: "image/svg+xml",
+        purpose: "any maskable",
+      },
       {
         src: "/icon-192.png",
         sizes: "192x192",
