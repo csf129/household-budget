@@ -5,7 +5,8 @@ import {
   withActiveLedgerOnly,
 } from "@/lib/ledger-archive-schema";
 import { createClient } from "@/lib/supabase/server";
-import { callAi, streamAi } from "@/lib/call-ai";
+import { runAiWithTools, createTextStream } from "@/lib/call-ai";
+import { createAssistantTools } from "@/lib/assistant-tools";
 import { getHouseholdAiModel } from "@/lib/get-household-ai-model";
 
 export const maxDuration = 60;
@@ -190,11 +191,28 @@ async function buildPromptContext(messages: Array<{ role: "user" | "assistant"; 
       content:
         "Navigation: Overview for trends, Transactions for details/filters, Plans for goals, Settings > Budget for category budgets, Settings > Bank for sync.",
     },
+    {
+      role: "system" as const,
+      content:
+        "You can call the query_spending tool to pull exact figures from the full transaction " +
+        "history, which goes well beyond the 90-day summary above. Use it for any question " +
+        "about a specific merchant, category, or time period, or whenever asked for a " +
+        "per-month or per-category breakdown. For a concept with no category of its own " +
+        "(e.g. streaming services), pass the well-known merchant names in description_contains. " +
+        "Prefer tool results over the summary when they disagree. After the data returns, give " +
+        "a concise, numeric answer; for a per-month request, list each month with its total.",
+    },
     { role: "system" as const, content: `Household context:\n${context}` },
     ...messages.map((m) => ({ role: m.role, content: m.content })),
   ];
 
-  return { promptMessages, modelId };
+  return {
+    promptMessages,
+    modelId,
+    supabase,
+    householdId: household.householdId,
+    hasLedgerArchive,
+  };
 }
 
 export async function POST(request: Request) {
@@ -222,31 +240,40 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: promptResult.error }, { status: promptResult.status });
   }
 
-  const { promptMessages, modelId } = promptResult;
+  const { promptMessages, modelId, supabase, householdId, hasLedgerArchive } = promptResult;
+  const tools = createAssistantTools(supabase, householdId, hasLedgerArchive);
 
-  if (!streamMode) {
-    try {
-      const reply = await callAi({ modelId, messages: promptMessages, temperature: 0.2 });
-      if (!reply) {
-        return NextResponse.json({ error: "AI returned an empty response." }, { status: 502 });
-      }
-      return NextResponse.json({ reply });
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      return NextResponse.json({ error: msg }, { status: 502 });
-    }
-  }
-
+  // The tool loop runs its rounds before we respond, so provider/tool errors
+  // throw here and surface as a clean JSON 502 (the stream, once opened, can't).
+  let text: string;
+  let usage;
   try {
-    const stream = await streamAi({ modelId, messages: promptMessages, temperature: 0.2 });
-    return new Response(stream, {
-      headers: {
-        "Content-Type": "text/plain; charset=utf-8",
-        "Cache-Control": "no-cache, no-transform",
-      },
+    const result = await runAiWithTools({
+      modelId,
+      messages: promptMessages,
+      tools,
+      temperature: 0.2,
+      maxTokens: 1500,
     });
+    text = result.text;
+    usage = result.usage;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     return NextResponse.json({ error: msg }, { status: 502 });
   }
+
+  if (!text) {
+    return NextResponse.json({ error: "AI returned an empty response." }, { status: 502 });
+  }
+
+  if (!streamMode) {
+    return NextResponse.json({ reply: text });
+  }
+
+  return new Response(createTextStream(text, usage), {
+    headers: {
+      "Content-Type": "text/plain; charset=utf-8",
+      "Cache-Control": "no-cache, no-transform",
+    },
+  });
 }
