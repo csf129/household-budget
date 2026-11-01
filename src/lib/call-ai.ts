@@ -1,4 +1,4 @@
-import { getModelConfig, DEFAULT_AI_MODEL_ID } from "@/lib/ai-models";
+import { resolveProvider, DEFAULT_AI_MODEL_ID } from "@/lib/ai-models";
 
 export type AiChatMessage = {
   role: "system" | "user" | "assistant";
@@ -32,13 +32,22 @@ export type AiTool = {
   run: (input: Record<string, unknown>) => Promise<unknown>;
 };
 
-/** o-series reasoning models don't accept temperature or max_tokens — use max_completion_tokens instead. */
+/** o-series reasoning models (o1/o3/o4…) have their own JSON/response-format rules. */
 function isOSeriesModel(modelId: string): boolean {
   return /^o\d/.test(modelId);
 }
 
+/**
+ * "Modern" OpenAI models — o-series plus the GPT-5 and GPT-6 families — require
+ * `max_completion_tokens` (not `max_tokens`) and accept only the default
+ * temperature, so we omit it. Older gpt-4o / gpt-4.1 models keep the legacy shape.
+ */
+function isModernOpenAiModel(modelId: string): boolean {
+  return /^o\d/.test(modelId) || /^gpt-[56]/.test(modelId);
+}
+
 function tokenLimitKey(modelId: string): "max_tokens" | "max_completion_tokens" {
-  return isOSeriesModel(modelId) ? "max_completion_tokens" : "max_tokens";
+  return isModernOpenAiModel(modelId) ? "max_completion_tokens" : "max_tokens";
 }
 
 function splitSystemMessages(messages: AiChatMessage[]): {
@@ -72,13 +81,15 @@ async function callOpenAi(opts: {
     model: opts.modelId,
     messages: opts.messages,
   };
-  // o-series uses max_completion_tokens; standard models only set max_tokens when caller specifies one
-  if (isOSeriesModel(opts.modelId)) {
+  // Modern models (GPT-5/6 + o-series) use max_completion_tokens; legacy models
+  // only set max_tokens when the caller specifies one.
+  if (isModernOpenAiModel(opts.modelId)) {
     body.max_completion_tokens = opts.maxTokens ?? 16000;
   } else if (opts.maxTokens !== null) {
     body.max_tokens = opts.maxTokens;
   }
-  if (!isOSeriesModel(opts.modelId)) {
+  // Modern models accept only the default temperature — omit it to avoid a 400.
+  if (!isModernOpenAiModel(opts.modelId)) {
     body.temperature = opts.temperature;
   }
   // o-series models don't support response_format json_object; they follow JSON instructions via prompt
@@ -118,10 +129,11 @@ async function callAnthropic(opts: {
 
   const { systemText, conversationMessages } = splitSystemMessages(opts.messages);
 
+  // Note: `temperature` is intentionally omitted. Current Claude models (and the
+  // 2026-10-21 API version) reject sampling params; default sampling is used.
   const body: Record<string, unknown> = {
     model: opts.modelId,
     max_tokens: opts.maxTokens,
-    temperature: opts.temperature,
     messages: conversationMessages,
   };
   if (systemText) body.system = systemText;
@@ -152,8 +164,7 @@ export async function callAi(opts: {
   jsonMode?: boolean;
 }): Promise<string> {
   const modelId = opts.modelId ?? DEFAULT_AI_MODEL_ID;
-  const config = getModelConfig(modelId);
-  const provider = config?.provider ?? "openai";
+  const provider = resolveProvider(modelId);
   const temperature = opts.temperature ?? 0.2;
   const maxTokens = opts.maxTokens ?? 1024;
 
@@ -185,7 +196,7 @@ async function streamOpenAi(opts: {
     messages: opts.messages,
     [tokenLimitKey(opts.modelId)]: 1024,
   };
-  if (!isOSeriesModel(opts.modelId)) {
+  if (!isModernOpenAiModel(opts.modelId)) {
     streamBody.temperature = opts.temperature;
   }
 
@@ -258,7 +269,6 @@ async function streamAnthropic(opts: {
   const body: Record<string, unknown> = {
     model: opts.modelId,
     max_tokens: 1024,
-    temperature: opts.temperature,
     stream: true,
     messages: conversationMessages,
   };
@@ -339,8 +349,7 @@ export async function streamAi(opts: {
   temperature?: number;
 }): Promise<ReadableStream<Uint8Array>> {
   const modelId = opts.modelId ?? DEFAULT_AI_MODEL_ID;
-  const config = getModelConfig(modelId);
-  const provider = config?.provider ?? "openai";
+  const provider = resolveProvider(modelId);
   const temperature = opts.temperature ?? 0.2;
 
   if (provider === "anthropic") {
@@ -406,7 +415,6 @@ async function anthropicToolRounds(opts: {
     const body: Record<string, unknown> = {
       model: opts.modelId,
       max_tokens: opts.maxTokens,
-      temperature: opts.temperature,
       messages: msgs,
     };
     if (systemText) body.system = systemText;
@@ -502,7 +510,7 @@ async function openaiToolRounds(opts: {
       messages: msgs,
       [tokenLimitKey(opts.modelId)]: opts.maxTokens,
     };
-    if (!isOSeriesModel(opts.modelId)) body.temperature = opts.temperature;
+    if (!isModernOpenAiModel(opts.modelId)) body.temperature = opts.temperature;
     if (!lastRound) body.tools = toolDefs;
 
     const res = await fetch("https://api.openai.com/v1/chat/completions", {
@@ -572,8 +580,7 @@ export async function runAiWithTools(opts: {
   maxRounds?: number;
 }): Promise<ToolRunResult> {
   const modelId = opts.modelId ?? DEFAULT_AI_MODEL_ID;
-  const config = getModelConfig(modelId);
-  const provider = config?.provider ?? "openai";
+  const provider = resolveProvider(modelId);
   const shared = {
     modelId,
     messages: opts.messages,

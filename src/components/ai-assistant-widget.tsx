@@ -43,15 +43,18 @@ function parseUsageSentinel(full: string): { text: string; usage: TokenUsage | u
   }
 }
 
+// Prices per 1M tokens, verified 2026-11-01 (platform.claude.com / developers.openai.com).
 const PRICING_ROWS = [
+  { model: "GPT-6 Luna",       provider: "ChatGPT",  input: "$0.10",  output: "$0.50"  },
+  { model: "Claude Haiku 5.5", provider: "Claude",   input: "$0.10",  output: "$0.50"  },
   { model: "GPT-4o mini",      provider: "ChatGPT",  input: "$0.15",  output: "$0.60"  },
-  { model: "Claude Haiku 4.5", provider: "Claude",   input: "$0.80",  output: "$4.00"  },
-  { model: "GPT-4o",           provider: "ChatGPT",  input: "$2.50",  output: "$10.00" },
-  { model: "GPT-4.1",          provider: "ChatGPT",  input: "$2.00",  output: "$8.00"  },
-  { model: "Claude Sonnet 4.6",provider: "Claude",   input: "$3.00",  output: "$15.00" },
-  { model: "o4-mini",          provider: "ChatGPT",  input: "$1.10",  output: "$4.40"  },
-  { model: "Claude Opus 4.7",  provider: "Claude",   input: "$15.00", output: "$75.00" },
-  { model: "o3",               provider: "ChatGPT",  input: "$10.00", output: "$40.00" },
+  { model: "GPT-6.1 Terra",    provider: "ChatGPT",  input: "$1.00",  output: "$5.00"  },
+  { model: "Claude Sonnet 5.5",provider: "Claude",   input: "$2.00",  output: "$10.00" },
+  { model: "GPT-6.1 Sol",      provider: "ChatGPT",  input: "$2.00",  output: "$10.00" },
+  { model: "o3",               provider: "ChatGPT",  input: "$2.00",  output: "$8.00"  },
+  { model: "Claude Opus 5.5",  provider: "Claude",   input: "$4.00",  output: "$20.00" },
+  { model: "GPT-6 Astra",      provider: "ChatGPT",  input: "$10.00", output: "$50.00" },
+  { model: "Claude Fable 5.1", provider: "Claude",   input: "$10.00", output: "$50.00" },
 ];
 
 function PricingTooltip() {
