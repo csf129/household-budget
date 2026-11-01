@@ -71,6 +71,7 @@ export function DashboardWeeklyBudgetTable({
   const skipPersistRef = useRef(true);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: one-time hydrate from localStorage on mount
     setWeekStartsOn(readWeekStartFromStorage());
   }, []);
 

@@ -39,8 +39,5 @@ jobs:
           NEXT_PUBLIC_SUPABASE_URL: https://ci-placeholder.supabase.co
           NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-placeholder-anon-key
 
-      # Non-blocking for now: the repo has pre-existing lint errors. Once those
-      # are fixed, drop `continue-on-error` to make lint a required gate.
       - name: Lint
         run: npm run lint
-        continue-on-error: true

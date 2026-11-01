@@ -436,6 +436,7 @@ export function DashboardOverviewCharts({
   useEffect(() => {
     if (bankTransferAccountId == null) return;
     if (!bankTransferAccountOptions.some((o) => o.id === bankTransferAccountId)) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: clear a selection that no longer exists in the options
       setBankTransferAccountId(null);
     }
   }, [bankTransferAccountOptions, bankTransferAccountId]);
@@ -522,9 +523,11 @@ export function DashboardOverviewCharts({
 
   useEffect(() => {
     if (chartRows.length === 0) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: reset selection when there are no rows
       setCategoryBucketKey(null);
       return;
     }
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: keep the selected bucket valid as chart rows change
     setCategoryBucketKey((prev) => {
       if (prev && chartRows.some((r) => r.key === prev)) return prev;
       const lastWithSpend = [...chartRows]
