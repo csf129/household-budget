@@ -14,6 +14,24 @@ export type TokenUsage = {
 /** Sentinel prefix appended at end of stream — null byte makes it unambiguous. */
 export const USAGE_SENTINEL = "\x00__USAGE__";
 
+/** JSON-schema-ish description of a tool's input, passed to both providers. */
+export type AiToolSpec = {
+  name: string;
+  description: string;
+  inputSchema: {
+    type: "object";
+    properties: Record<string, unknown>;
+    required?: string[];
+  };
+};
+
+/** A callable tool: its spec plus a server-side executor. The executor's
+ *  return value is JSON-serialized and handed back to the model as a result. */
+export type AiTool = {
+  spec: AiToolSpec;
+  run: (input: Record<string, unknown>) => Promise<unknown>;
+};
+
 /** o-series reasoning models don't accept temperature or max_tokens — use max_completion_tokens instead. */
 function isOSeriesModel(modelId: string): boolean {
   return /^o\d/.test(modelId);
@@ -329,4 +347,255 @@ export async function streamAi(opts: {
     return streamAnthropic({ modelId, messages: opts.messages, temperature });
   }
   return streamOpenAi({ modelId, messages: opts.messages, temperature });
+}
+
+// ───────────────────────────── Tool-calling loop ─────────────────────────────
+
+const DEFAULT_TOOL_ROUNDS = 4;
+
+type ToolRunResult = { text: string; usage: TokenUsage };
+
+async function runToolImpl(
+  tools: AiTool[],
+  name: string,
+  input: Record<string, unknown>,
+): Promise<unknown> {
+  const tool = tools.find((t) => t.spec.name === name);
+  if (!tool) return { error: `Unknown tool: ${name}` };
+  try {
+    return await tool.run(input);
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+type AnthropicBlock =
+  | { type: "text"; text?: string }
+  | { type: "tool_use"; id: string; name: string; input?: Record<string, unknown> }
+  | { type: string; [k: string]: unknown };
+
+async function anthropicToolRounds(opts: {
+  modelId: string;
+  messages: AiChatMessage[];
+  tools: AiTool[];
+  temperature: number;
+  maxTokens: number;
+  maxRounds: number;
+}): Promise<ToolRunResult> {
+  const apiKey = process.env.ANTHROPIC_API_KEY?.trim();
+  if (!apiKey) throw new Error("ANTHROPIC_API_KEY is not configured.");
+
+  const { systemText, conversationMessages } = splitSystemMessages(opts.messages);
+  const toolDefs = opts.tools.map((t) => ({
+    name: t.spec.name,
+    description: t.spec.description,
+    input_schema: t.spec.inputSchema,
+  }));
+
+  // Content starts as plain strings; tool rounds append block arrays.
+  const msgs: Array<{ role: string; content: unknown }> = conversationMessages.map((m) => ({
+    role: m.role,
+    content: m.content,
+  }));
+
+  let prompt = 0;
+  let completion = 0;
+
+  for (let round = 0; round < opts.maxRounds; round++) {
+    const lastRound = round === opts.maxRounds - 1;
+    const body: Record<string, unknown> = {
+      model: opts.modelId,
+      max_tokens: opts.maxTokens,
+      temperature: opts.temperature,
+      messages: msgs,
+    };
+    if (systemText) body.system = systemText;
+    // On the final round, drop tools so the model must answer with text.
+    if (!lastRound) body.tools = toolDefs;
+
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const txt = await res.text();
+      throw new Error(`Anthropic failed (${res.status}): ${txt.slice(0, 400)}`);
+    }
+    const data = (await res.json()) as {
+      content?: AnthropicBlock[];
+      stop_reason?: string;
+      usage?: { input_tokens?: number; output_tokens?: number };
+    };
+    prompt += data.usage?.input_tokens ?? 0;
+    completion += data.usage?.output_tokens ?? 0;
+
+    const content = data.content ?? [];
+    const toolUses = content.filter(
+      (b): b is { type: "tool_use"; id: string; name: string; input?: Record<string, unknown> } =>
+        b.type === "tool_use",
+    );
+
+    if (data.stop_reason !== "tool_use" || toolUses.length === 0) {
+      const text = content
+        .filter((b): b is { type: "text"; text?: string } => b.type === "text")
+        .map((b) => b.text ?? "")
+        .join("")
+        .trim();
+      return { text, usage: { prompt, completion, total: prompt + completion } };
+    }
+
+    msgs.push({ role: "assistant", content });
+    const results = [];
+    for (const tu of toolUses) {
+      const result = await runToolImpl(opts.tools, tu.name, tu.input ?? {});
+      results.push({
+        type: "tool_result",
+        tool_use_id: tu.id,
+        content: JSON.stringify(result),
+      });
+    }
+    msgs.push({ role: "user", content: results });
+  }
+
+  return { text: "", usage: { prompt, completion, total: prompt + completion } };
+}
+
+type OpenAiToolCall = { id: string; function: { name: string; arguments: string } };
+
+async function openaiToolRounds(opts: {
+  modelId: string;
+  messages: AiChatMessage[];
+  tools: AiTool[];
+  temperature: number;
+  maxTokens: number;
+  maxRounds: number;
+}): Promise<ToolRunResult> {
+  const apiKey = process.env.OPENAI_API_KEY?.trim();
+  if (!apiKey) throw new Error("OPENAI_API_KEY is not configured.");
+
+  const toolDefs = opts.tools.map((t) => ({
+    type: "function",
+    function: {
+      name: t.spec.name,
+      description: t.spec.description,
+      parameters: t.spec.inputSchema,
+    },
+  }));
+
+  const msgs: Array<Record<string, unknown>> = opts.messages.map((m) => ({
+    role: m.role,
+    content: m.content,
+  }));
+
+  let prompt = 0;
+  let completion = 0;
+
+  for (let round = 0; round < opts.maxRounds; round++) {
+    const lastRound = round === opts.maxRounds - 1;
+    const body: Record<string, unknown> = {
+      model: opts.modelId,
+      messages: msgs,
+      [tokenLimitKey(opts.modelId)]: opts.maxTokens,
+    };
+    if (!isOSeriesModel(opts.modelId)) body.temperature = opts.temperature;
+    if (!lastRound) body.tools = toolDefs;
+
+    const res = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const txt = await res.text();
+      throw new Error(`OpenAI failed (${res.status}): ${txt.slice(0, 400)}`);
+    }
+    const data = (await res.json()) as {
+      choices?: Array<{
+        message?: { content?: string | null; tool_calls?: OpenAiToolCall[] };
+      }>;
+      usage?: { prompt_tokens?: number; completion_tokens?: number };
+    };
+    prompt += data.usage?.prompt_tokens ?? 0;
+    completion += data.usage?.completion_tokens ?? 0;
+
+    const message = data.choices?.[0]?.message;
+    const toolCalls = message?.tool_calls ?? [];
+
+    if (toolCalls.length === 0) {
+      return {
+        text: (message?.content ?? "").trim(),
+        usage: { prompt, completion, total: prompt + completion },
+      };
+    }
+
+    // Echo the assistant tool-call message back, then one tool message per call.
+    msgs.push({
+      role: "assistant",
+      content: message?.content ?? "",
+      tool_calls: toolCalls,
+    });
+    for (const tc of toolCalls) {
+      let args: Record<string, unknown> = {};
+      try {
+        args = JSON.parse(tc.function.arguments || "{}") as Record<string, unknown>;
+      } catch {
+        /* leave args empty on malformed JSON */
+      }
+      const result = await runToolImpl(opts.tools, tc.function.name, args);
+      msgs.push({
+        role: "tool",
+        tool_call_id: tc.id,
+        content: JSON.stringify(result),
+      });
+    }
+  }
+
+  return { text: "", usage: { prompt, completion, total: prompt + completion } };
+}
+
+/**
+ * Run an agentic tool-calling loop and return the model's final text plus
+ * accumulated token usage across every round. Works for both providers; on the
+ * last allowed round tools are withheld so the model is forced to answer.
+ */
+export async function runAiWithTools(opts: {
+  modelId?: string;
+  messages: AiChatMessage[];
+  tools: AiTool[];
+  temperature?: number;
+  maxTokens?: number;
+  maxRounds?: number;
+}): Promise<ToolRunResult> {
+  const modelId = opts.modelId ?? DEFAULT_AI_MODEL_ID;
+  const config = getModelConfig(modelId);
+  const provider = config?.provider ?? "openai";
+  const shared = {
+    modelId,
+    messages: opts.messages,
+    tools: opts.tools,
+    temperature: opts.temperature ?? 0.2,
+    maxTokens: opts.maxTokens ?? 1500,
+    maxRounds: opts.maxRounds ?? DEFAULT_TOOL_ROUNDS,
+  };
+  return provider === "anthropic" ? anthropicToolRounds(shared) : openaiToolRounds(shared);
+}
+
+/** Wrap already-computed text (and optional usage) as the chunk+sentinel stream
+ *  the chat client expects, so the tool path reuses the streaming contract. */
+export function createTextStream(text: string, usage?: TokenUsage): ReadableStream<Uint8Array> {
+  const encoder = new TextEncoder();
+  return new ReadableStream<Uint8Array>({
+    start(controller) {
+      if (text) controller.enqueue(encoder.encode(text));
+      if (usage) {
+        controller.enqueue(encoder.encode(`${USAGE_SENTINEL}${JSON.stringify(usage)}`));
+      }
+      controller.close();
+    },
+  });
 }
