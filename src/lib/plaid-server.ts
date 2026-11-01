@@ -50,6 +50,18 @@ export function createPlaidClient(): PlaidApi {
   );
 }
 
+/**
+ * OAuth redirect URI for Plaid Link. Required for OAuth institutions (most large
+ * US banks in Production, e.g. Chase and Bank of America): the value must be set
+ * here AND registered verbatim under Plaid Dashboard → Team Settings → API →
+ * Allowed redirect URIs. Returns undefined when unset so sandbox/dev keeps the
+ * non-OAuth flow.
+ */
+export function getPlaidRedirectUri(): string | undefined {
+  const uri = process.env.PLAID_REDIRECT_URI?.trim();
+  return uri || undefined;
+}
+
 export function getPlaidWebhookUrl(): string | undefined {
   const full = process.env.PLAID_WEBHOOK_URL?.trim();
   if (full) return full;

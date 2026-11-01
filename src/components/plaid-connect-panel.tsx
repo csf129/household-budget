@@ -3,6 +3,14 @@
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { usePlaidLink } from "react-plaid-link";
+import {
+  clearPlaidLinkToken,
+  isPlaidOAuthRedirect,
+  loadPlaidLinkToken,
+  plaidOAuthRedirectHref,
+  savePlaidLinkToken,
+  stripPlaidOAuthParam,
+} from "@/lib/plaid-link-oauth";
 
 type Props = {
   disabled?: boolean;
@@ -10,17 +18,25 @@ type Props = {
   plaidEnv?: "sandbox" | "development" | "production";
 };
 
+/** Identifies this Link instance when resuming after an OAuth redirect. */
+const LINK_FLOW = "connect";
+
 export function PlaidConnectPanel({
   disabled = false,
   plaidEnv = "sandbox",
 }: Props) {
   const router = useRouter();
   const [linkToken, setLinkToken] = useState<string | null>(null);
+  const [receivedRedirectUri, setReceivedRedirectUri] = useState<
+    string | undefined
+  >(undefined);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   const onSuccess = useCallback(
     async (publicToken: string) => {
+      clearPlaidLinkToken(LINK_FLOW);
+      stripPlaidOAuthParam();
       setError(null);
       setBusy(true);
       try {
@@ -47,11 +63,25 @@ export function PlaidConnectPanel({
 
   const { open, ready } = usePlaidLink({
     token: linkToken,
+    receivedRedirectUri,
     onSuccess,
     onExit: () => {
+      clearPlaidLinkToken(LINK_FLOW);
+      stripPlaidOAuthParam();
       setLinkToken(null);
     },
   });
+
+  // Resume Link after an OAuth bank redirected back: the page fully reloaded,
+  // so restore the token we stashed before the handoff and re-open with the
+  // redirect URL. Only the instance that started this flow has a stashed token.
+  useEffect(() => {
+    if (!isPlaidOAuthRedirect()) return;
+    const stashed = loadPlaidLinkToken(LINK_FLOW);
+    if (!stashed) return;
+    setReceivedRedirectUri(plaidOAuthRedirectHref());
+    setLinkToken(stashed);
+  }, []);
 
   useEffect(() => {
     if (linkToken && ready) {
@@ -89,6 +119,8 @@ export function PlaidConnectPanel({
         setError("No link token returned.");
         return;
       }
+      // Stash before opening so an OAuth bank's redirect can resume this token.
+      savePlaidLinkToken(LINK_FLOW, data.link_token);
       setLinkToken(data.link_token);
     } catch {
       setError("Network error while contacting the server.");

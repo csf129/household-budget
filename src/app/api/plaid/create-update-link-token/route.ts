@@ -2,7 +2,11 @@ import { NextResponse } from "next/server";
 import { CountryCode, Products } from "plaid";
 import { decryptPlaidAccessToken } from "@/lib/plaid-token-crypto";
 import { requireHouseholdHead } from "@/lib/api-auth";
-import { createPlaidClient, getPlaidWebhookUrl } from "@/lib/plaid-server";
+import {
+  createPlaidClient,
+  getPlaidRedirectUri,
+  getPlaidWebhookUrl,
+} from "@/lib/plaid-server";
 import { createClient } from "@/lib/supabase/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
@@ -60,6 +64,7 @@ export async function POST(request: Request) {
   const accessToken = decryptPlaidAccessToken(sec.plaid_access_token_ciphertext);
   const plaid = createPlaidClient();
   const webhook = getPlaidWebhookUrl();
+  const redirectUri = getPlaidRedirectUri();
 
   try {
     const res = await plaid.linkTokenCreate({
@@ -70,6 +75,8 @@ export async function POST(request: Request) {
       products: [Products.Transactions],
       access_token: accessToken,
       transactions: { days_requested: 730 },
+      // Required for OAuth banks on relink, same as the initial-connect flow.
+      ...(redirectUri ? { redirect_uri: redirectUri } : {}),
       // Let the user re-select which accounts are shared. Without this, update
       // mode only re-authenticates and cannot re-add an account the bank has
       // stopped sharing (e.g. a BofA checking account that dropped off the

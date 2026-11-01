@@ -46,7 +46,9 @@ Copy `.env.local.example` → `.env.local`.
 | `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Required for app + browser client |
 | `SUPABASE_SERVICE_ROLE_KEY` | Server/admin operations (Plaid, webhooks, some APIs) — **never** expose to client |
 | `OPENAI_API_KEY` | Optional: auto-categorize, assistant, budget propose |
-| Plaid: `PLAID_CLIENT_ID`, `PLAID_SECRET`, `PLAID_ENV`, `PLAID_TOKEN_ENCRYPTION_KEY`, `PLAID_WEBHOOK_URL`, `NEXT_PUBLIC_APP_URL` | Bank linking (see `.env.local.example` comments) |
+| Plaid: `PLAID_CLIENT_ID`, `PLAID_SECRET`, `PLAID_ENV`, `PLAID_TOKEN_ENCRYPTION_KEY`, `PLAID_WEBHOOK_URL`, `PLAID_REDIRECT_URI`, `NEXT_PUBLIC_APP_URL` | Bank linking (see `.env.local.example` comments) |
+
+**`PLAID_REDIRECT_URI`** — required for OAuth banks (Chase, Bank of America, most large US banks in Production). Set it to a page URL on this app, e.g. `https://<your-domain>/settings/bank`, and register the exact same URL under Plaid Dashboard → Team Settings → API → **Allowed redirect URIs**. Leave it unset for sandbox/non-OAuth flows. Without it, Plaid Link fails for OAuth banks with a generic "Something went wrong — Internal error occurred".
 
 ---
 

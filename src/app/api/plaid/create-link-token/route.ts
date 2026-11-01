@@ -1,7 +1,11 @@
 import { NextResponse } from "next/server";
 import { CountryCode, Products } from "plaid";
 import { requireHouseholdHead } from "@/lib/api-auth";
-import { createPlaidClient, getPlaidWebhookUrl } from "@/lib/plaid-server";
+import {
+  createPlaidClient,
+  getPlaidRedirectUri,
+  getPlaidWebhookUrl,
+} from "@/lib/plaid-server";
 import { createClient } from "@/lib/supabase/server";
 
 export const maxDuration = 30;
@@ -28,6 +32,7 @@ export async function POST() {
 
   const plaid = createPlaidClient();
   const webhook = getPlaidWebhookUrl();
+  const redirectUri = getPlaidRedirectUri();
 
   try {
     const res = await plaid.linkTokenCreate({
@@ -41,6 +46,9 @@ export async function POST() {
       country_codes: [CountryCode.Us],
       language: "en",
       ...(webhook ? { webhook } : {}),
+      // OAuth banks (Chase, BofA, …) redirect out to the bank and back; without
+      // a registered redirect URI Link fails with a generic internal error.
+      ...(redirectUri ? { redirect_uri: redirectUri } : {}),
     });
 
     const token = res.data.link_token;
