@@ -1,6 +1,10 @@
 {
   "crons": [
     {
+      "path": "/api/cron/sync-transactions",
+      "schedule": "0 5 * * *"
+    },
+    {
       "path": "/api/cron/email-summary",
       "schedule": "0 8 * * *"
     },
