@@ -163,23 +163,37 @@ export async function POST(request: Request) {
     allowedCategoryIds,
   );
 
-  let updated = 0;
+  // Group transaction ids by the category they were assigned, so we issue one
+  // UPDATE … IN (ids) per category instead of one round-trip per transaction.
+  const idsByCategory = new Map<string, string[]>();
   for (const [transactionId, categoryId] of toApply) {
-    const { error: upErr, data: updatedRows } = await supabase
-      .from("transactions")
-      .update({ category_id: categoryId })
-      .eq("id", transactionId)
-      .eq("household_id", household.householdId)
-      .is("category_id", null)
-      .select("id");
+    const list = idsByCategory.get(categoryId);
+    if (list) list.push(transactionId);
+    else idsByCategory.set(categoryId, [transactionId]);
+  }
 
-    if (upErr) {
-      return NextResponse.json(
-        { error: upErr.message, updated },
-        { status: 500 },
-      );
+  // Cap each IN (…) list so a very large assignment set can't blow the query.
+  const UPDATE_CHUNK = 200;
+  let updated = 0;
+  for (const [categoryId, ids] of idsByCategory) {
+    for (let i = 0; i < ids.length; i += UPDATE_CHUNK) {
+      const chunk = ids.slice(i, i + UPDATE_CHUNK);
+      const { error: upErr, data: updatedRows } = await supabase
+        .from("transactions")
+        .update({ category_id: categoryId })
+        .in("id", chunk)
+        .eq("household_id", household.householdId)
+        .is("category_id", null)
+        .select("id");
+
+      if (upErr) {
+        return NextResponse.json(
+          { error: upErr.message, updated },
+          { status: 500 },
+        );
+      }
+      updated += updatedRows?.length ?? 0;
     }
-    if (updatedRows && updatedRows.length > 0) updated += 1;
   }
 
   return NextResponse.json({
