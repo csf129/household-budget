@@ -79,6 +79,40 @@ export type ReportSavingsPlan = {
   pace: number;
 };
 
+/** How hard a saving is to act on, used to rank and color opportunities. */
+export type SavingsEffort = "easy" | "medium" | "hard";
+
+/** One ranked place the household can cut spending, grounded in report data. */
+export type SavingsOpportunity = {
+  /** Category or area the saving comes from, e.g. "Food & drink". */
+  category: string;
+  /** Current monthly spend for this area. */
+  current: number;
+  /** Trailing-average monthly spend this is compared against. */
+  avg: number;
+  /** Estimated dollars saved per month if acted on. */
+  estMonthlySaving: number;
+  effort: SavingsEffort;
+  /** One concrete, plain-English next step. */
+  action: string;
+};
+
+/**
+ * Structured "where to save the most, easiest first" analysis the AI returns,
+ * rendered as a graphical breakdown rather than prose. Every figure is grounded
+ * in `ReportData`.
+ */
+export type SavingsAnalysis = {
+  /** One-line headline summarizing the opportunity. */
+  headline: string;
+  /** Rough total monthly saving across the shortlist. */
+  totalMonthlySaving: number;
+  /** Opportunities ranked biggest + easiest first. */
+  opportunities: SavingsOpportunity[];
+  /** Category names worth doing first. */
+  shortlist: string[];
+};
+
 export type ReportData = {
   householdName: string;
   /** ISO timestamp the report was generated. */

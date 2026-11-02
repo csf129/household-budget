@@ -1,11 +1,17 @@
 import { callAi } from "@/lib/call-ai";
 import { DEFAULT_AI_MODEL_ID } from "@/lib/ai-models";
-import type { ReportData } from "@/types/report";
+import type {
+  ReportData,
+  SavingsAnalysis,
+  SavingsEffort,
+  SavingsOpportunity,
+} from "@/types/report";
 
 /**
- * AI "where to save the most, easiest first" narrative for the in-app report.
+ * AI "where to save the most, easiest first" analysis for the in-app report.
  * Runs on the household's configured model (Claude or OpenAI) via `call-ai`,
- * grounded in the assembled `ReportData` so it never invents figures.
+ * grounded in the assembled `ReportData` so it never invents figures, and
+ * returns a structured `SavingsAnalysis` the report renders graphically.
  */
 
 const fmtUSD = (n: number) =>
@@ -108,32 +114,127 @@ export function buildSavingsPromptInput(data: ReportData): string {
   return lines.join("\n");
 }
 
+const SYSTEM_PROMPT =
+  "You are a household finance advisor. From the data below, find the highest-impact, " +
+  "lowest-effort ways this household can save money, and rank them by impact × ease — the " +
+  "biggest, easiest wins first. Ground every number in the data provided; never invent a " +
+  "figure that isn't there, and never estimate a monthly saving larger than the amount a " +
+  "category is over its trailing average. Return ONLY a JSON object (no markdown, no prose, " +
+  "no code fences) matching exactly this shape:\n" +
+  '{\n' +
+  '  "headline": string,                // one plain-English sentence on the overall opportunity\n' +
+  '  "totalMonthlySaving": number,      // rough total $/month across the shortlist\n' +
+  '  "opportunities": [                 // ranked, biggest + easiest first, up to 6\n' +
+  '    {\n' +
+  '      "category": string,            // the area, e.g. "Food & drink"\n' +
+  '      "current": number,             // current monthly spend ($)\n' +
+  '      "avg": number,                 // trailing-average monthly spend ($)\n' +
+  '      "estMonthlySaving": number,    // realistic $/month saved if acted on\n' +
+  '      "effort": "easy" | "medium" | "hard",\n' +
+  '      "action": string               // one concrete next step, <= 20 words\n' +
+  '    }\n' +
+  '  ],\n' +
+  '  "shortlist": string[]              // category names worth doing first\n' +
+  "}\n" +
+  "All dollar amounts are plain numbers (no $ or commas).";
+
+const EFFORTS: SavingsEffort[] = ["easy", "medium", "hard"];
+
+function toNumber(value: unknown): number {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
+    const n = Number(value.replace(/[$,\s]/g, ""));
+    if (Number.isFinite(n)) return n;
+  }
+  return 0;
+}
+
+function toEffort(value: unknown): SavingsEffort {
+  return typeof value === "string" && (EFFORTS as string[]).includes(value.toLowerCase())
+    ? (value.toLowerCase() as SavingsEffort)
+    : "medium";
+}
+
+/** Extract the JSON object from a model reply that may be wrapped in fences/prose. */
+function extractJson(raw: string): unknown {
+  const fenced = raw.replace(/```(?:json)?/gi, "").trim();
+  const start = fenced.indexOf("{");
+  const end = fenced.lastIndexOf("}");
+  if (start === -1 || end === -1 || end <= start) return null;
+  try {
+    return JSON.parse(fenced.slice(start, end + 1));
+  } catch {
+    return null;
+  }
+}
+
+/** Coerce an arbitrary parsed value into a validated SavingsAnalysis, or null. */
+export function parseSavingsAnalysis(raw: string): SavingsAnalysis | null {
+  const obj = extractJson(raw);
+  if (!obj || typeof obj !== "object") return null;
+  const rec = obj as Record<string, unknown>;
+
+  const opportunities: SavingsOpportunity[] = Array.isArray(rec.opportunities)
+    ? rec.opportunities
+        .map((o): SavingsOpportunity | null => {
+          if (!o || typeof o !== "object") return null;
+          const r = o as Record<string, unknown>;
+          const category = typeof r.category === "string" ? r.category.trim() : "";
+          if (!category) return null;
+          return {
+            category,
+            current: toNumber(r.current),
+            avg: toNumber(r.avg),
+            estMonthlySaving: Math.max(0, toNumber(r.estMonthlySaving)),
+            effort: toEffort(r.effort),
+            action: typeof r.action === "string" ? r.action.trim() : "",
+          };
+        })
+        .filter((o): o is SavingsOpportunity => o !== null)
+        .slice(0, 6)
+    : [];
+
+  if (opportunities.length === 0) return null;
+
+  const shortlist = Array.isArray(rec.shortlist)
+    ? rec.shortlist.filter((s): s is string => typeof s === "string" && s.trim().length > 0)
+    : [];
+
+  const totalFromModel = toNumber(rec.totalMonthlySaving);
+  const totalMonthlySaving =
+    totalFromModel > 0
+      ? totalFromModel
+      : opportunities.reduce((sum, o) => sum + o.estMonthlySaving, 0);
+
+  return {
+    headline:
+      typeof rec.headline === "string" && rec.headline.trim()
+        ? rec.headline.trim()
+        : "Here's where your household can save the most, easiest first.",
+    totalMonthlySaving,
+    opportunities,
+    shortlist,
+  };
+}
+
 export async function generateSavingsInsights(
   data: ReportData,
   modelId?: string,
-): Promise<string> {
+): Promise<SavingsAnalysis | null> {
   const input = buildSavingsPromptInput(data);
   try {
-    return await callAi({
+    const raw = await callAi({
       modelId: modelId ?? DEFAULT_AI_MODEL_ID,
       temperature: 0.3,
       maxTokens: 1600,
+      jsonMode: true,
       messages: [
-        {
-          role: "system",
-          content:
-            "You are a household finance advisor. From the data below, find the highest-impact, " +
-            "lowest-effort ways this household can save money, and rank them by impact × ease — the " +
-            "biggest, easiest wins first. For each opportunity give: what it is, estimated monthly " +
-            "dollars saved, effort (easy / medium / hard), and a one-line action. Ground every number " +
-            "in the data provided; never invent a figure that isn't there. Finish with a short 'Do " +
-            "these first' shortlist and a rough total monthly saving. Use concise markdown: a numbered " +
-            "list, then the shortlist. No preamble.",
-        },
+        { role: "system", content: SYSTEM_PROMPT },
         { role: "user", content: input },
       ],
     });
+    return parseSavingsAnalysis(raw);
   } catch {
-    return "";
+    return null;
   }
 }
