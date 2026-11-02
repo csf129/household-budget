@@ -13,7 +13,12 @@ import {
   YAxis,
 } from "recharts";
 import { formatUsd, formatUsdCompact } from "@/lib/money";
-import type { ReportCategorySeries, ReportData } from "@/types/report";
+import type {
+  ReportCategorySeries,
+  ReportData,
+  SavingsAnalysis,
+  SavingsEffort,
+} from "@/types/report";
 
 const INCOME_COLOR = "#16a34a";
 const SPENDING_COLOR = "#7c3aed";
@@ -139,13 +144,147 @@ function CategoryList({ rows }: { rows: ReportCategorySeries[] }) {
   );
 }
 
+const EFFORT_META: Record<
+  SavingsEffort,
+  { label: string; badge: string; bar: string }
+> = {
+  easy: {
+    label: "Easy win",
+    badge: "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300",
+    bar: "bg-emerald-500",
+  },
+  medium: {
+    label: "Medium effort",
+    badge: "bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300",
+    bar: "bg-amber-500",
+  },
+  hard: {
+    label: "Heavier lift",
+    badge: "bg-rose-100 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300",
+    bar: "bg-rose-500",
+  },
+};
+
+function SavingsAnalysisView({ analysis }: { analysis: SavingsAnalysis }) {
+  const { opportunities, totalMonthlySaving, headline, shortlist } = analysis;
+  const maxSaving = Math.max(...opportunities.map((o) => o.estMonthlySaving), 1);
+
+  return (
+    <div className="space-y-5">
+      {/* Headline + total potential */}
+      <div className="rounded-xl border border-violet-200 bg-gradient-to-br from-violet-50 to-white p-5 dark:border-violet-900/50 dark:from-violet-950/40 dark:to-zinc-900">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <p className="max-w-md text-sm leading-relaxed text-zinc-700 dark:text-zinc-200">
+            {headline}
+          </p>
+          <div className="shrink-0 sm:text-right">
+            <div className="text-xs font-medium uppercase tracking-wide text-violet-600 dark:text-violet-300">
+              Potential savings
+            </div>
+            <div className="mt-0.5 text-3xl font-semibold text-violet-700 dark:text-violet-200">
+              {formatUsd(totalMonthlySaving)}
+              <span className="text-base font-normal text-violet-500 dark:text-violet-300">/mo</span>
+            </div>
+            <div className="text-xs text-violet-500/80 dark:text-violet-300/80">
+              ≈ {formatUsd(totalMonthlySaving * 12)} a year
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Ranked opportunities */}
+      <ol className="space-y-3">
+        {opportunities.map((o, i) => {
+          const meta = EFFORT_META[o.effort];
+          const over = o.current - o.avg;
+          return (
+            <li
+              key={`${o.category}-${i}`}
+              className="rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900/60"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex min-w-0 items-start gap-3">
+                  <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-zinc-100 text-xs font-semibold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
+                    {i + 1}
+                  </span>
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-medium text-zinc-900 dark:text-zinc-100">
+                        {o.category}
+                      </span>
+                      <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${meta.badge}`}>
+                        {meta.label}
+                      </span>
+                    </div>
+                    <div className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
+                      Now {formatUsd(o.current)} vs {formatUsd(o.avg)} avg
+                      {over > 0 ? (
+                        <span className="text-red-500 dark:text-red-400">
+                          {" "}
+                          · {formatUsd(over)} over
+                        </span>
+                      ) : null}
+                    </div>
+                  </div>
+                </div>
+                <div className="shrink-0 text-right">
+                  <div className="text-lg font-semibold text-emerald-600 dark:text-emerald-400">
+                    {formatUsd(o.estMonthlySaving)}
+                  </div>
+                  <div className="text-[11px] uppercase tracking-wide text-zinc-400">saves / mo</div>
+                </div>
+              </div>
+
+              {/* Proportional savings bar */}
+              <div className="mt-3 h-2 overflow-hidden rounded-full bg-zinc-100 dark:bg-zinc-800">
+                <div
+                  className={`h-full rounded-full ${meta.bar}`}
+                  style={{ width: `${Math.max(4, (o.estMonthlySaving / maxSaving) * 100)}%` }}
+                />
+              </div>
+
+              {o.action ? (
+                <p className="mt-3 flex gap-2 text-sm text-zinc-600 dark:text-zinc-300">
+                  <span aria-hidden className="text-violet-500">
+                    →
+                  </span>
+                  <span>{o.action}</span>
+                </p>
+              ) : null}
+            </li>
+          );
+        })}
+      </ol>
+
+      {/* Do these first */}
+      {shortlist.length > 0 ? (
+        <div className="rounded-xl border border-zinc-200 bg-zinc-50/80 p-4 dark:border-zinc-800 dark:bg-zinc-900/60">
+          <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+            Do these first
+          </div>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {shortlist.map((s) => (
+              <span
+                key={s}
+                className="rounded-full bg-violet-100 px-3 py-1 text-xs font-medium text-violet-700 dark:bg-violet-950/60 dark:text-violet-200"
+              >
+                {s}
+              </span>
+            ))}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export function ReportView({ householdName }: { householdName: string }) {
   const [months, setMonths] = useState(6);
   const [data, setData] = useState<ReportData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const [insights, setInsights] = useState<string | null>(null);
+  const [insights, setInsights] = useState<SavingsAnalysis | null>(null);
   const [insightsLoading, setInsightsLoading] = useState(false);
   const [insightsError, setInsightsError] = useState<string | null>(null);
 
@@ -189,7 +328,7 @@ export function ReportView({ householdName }: { householdName: string }) {
       .then(async (res) => {
         const json = await res.json();
         if (!res.ok) throw new Error(json?.error ?? `Request failed (${res.status})`);
-        return json as { insights: string };
+        return json as { insights: SavingsAnalysis };
       })
       .then((json) => setInsights(json.insights))
       .catch((err: unknown) =>
@@ -428,9 +567,7 @@ export function ReportView({ householdName }: { householdName: string }) {
             {insightsError}
           </p>
         ) : insights ? (
-          <div className="whitespace-pre-wrap text-sm leading-relaxed text-zinc-700 dark:text-zinc-300">
-            {insights}
-          </div>
+          <SavingsAnalysisView analysis={insights} />
         ) : (
           <p className="text-sm text-zinc-500 dark:text-zinc-400">
             Run your household&apos;s AI assistant over this report to get a prioritized,
