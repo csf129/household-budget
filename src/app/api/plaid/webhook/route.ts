@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { createPlaidClient } from "@/lib/plaid-server";
 import { verifyPlaidWebhook } from "@/lib/plaid-webhook-verify";
 import { syncPlaidTransactionsForConnection } from "@/lib/plaid-sync";
+import { autoCategorizeUncategorizedForHousehold } from "@/lib/auto-categorize-household";
+import { getHouseholdAiModel } from "@/lib/get-household-ai-model";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
 export const maxDuration = 120;
@@ -67,7 +69,7 @@ export async function POST(request: Request) {
   }
 
   try {
-    await syncPlaidTransactionsForConnection(
+    const result = await syncPlaidTransactionsForConnection(
       admin,
       plaid,
       row.id,
@@ -76,6 +78,24 @@ export async function POST(request: Request) {
       // (or the daily cron) resumes any remaining backfill from the saved cursor.
       { deadlineMs: 50_000 },
     );
+
+    // AI-categorize the rows this sync just imported (only those no
+    // deterministic rule already claimed), so transactions arrive already
+    // categorized rather than waiting for the daily cron. Best-effort: a
+    // missing AI key or model error must never fail the webhook — the
+    // transactions are already saved.
+    if (result.upserted + result.ledger_replaced > 0) {
+      try {
+        const modelId = await getHouseholdAiModel(admin, row.household_id);
+        await autoCategorizeUncategorizedForHousehold(
+          admin,
+          row.household_id,
+          modelId,
+        );
+      } catch (e) {
+        console.warn("[plaid] webhook auto-categorize (non-fatal)", itemId, e);
+      }
+    }
   } catch (e) {
     console.error("plaid webhook sync", itemId, e);
   }
