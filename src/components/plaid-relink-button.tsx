@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { usePlaidLink } from "react-plaid-link";
+import { formatPlaidExitError } from "@/lib/plaid-link-error";
 import {
   clearPlaidLinkToken,
   isPlaidOAuthRedirect,
@@ -64,10 +65,14 @@ export function PlaidRelinkButton({ bankConnectionId, disabled = false }: Props)
     token: linkToken,
     receivedRedirectUri,
     onSuccess,
-    onExit: () => {
+    onExit: (err) => {
       clearPlaidLinkToken(linkFlow);
       stripPlaidOAuthParam();
       setLinkToken(null);
+      // Surface the real reason Link failed instead of swallowing it; null when
+      // the user just closed the dialog.
+      const msg = formatPlaidExitError(err);
+      if (msg) setError(msg);
     },
   });
 

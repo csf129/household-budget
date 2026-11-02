@@ -6,6 +6,7 @@ import {
   createPlaidClient,
   getPlaidRedirectUri,
   getPlaidWebhookUrl,
+  plaidApiErrorMessage,
 } from "@/lib/plaid-server";
 import { createClient } from "@/lib/supabase/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
@@ -90,8 +91,12 @@ export async function POST(request: Request) {
       expiration: res.data.expiration,
     });
   } catch (e) {
-    const msg = e instanceof Error ? e.message : "Could not start relink.";
-    return NextResponse.json({ error: msg }, { status: 502 });
+    console.error("create-update-link-token: linkTokenCreate failed:", e);
+    const { message, code } = plaidApiErrorMessage(e);
+    return NextResponse.json(
+      { error: message, plaid_error_code: code },
+      { status: 502 },
+    );
   }
 }
 
