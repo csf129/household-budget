@@ -139,6 +139,7 @@ export function TransactionsManager({
   const [loading, setLoading] = useState(false);
   const [editingTx, setEditingTx] = useState<TransactionRow | null>(null);
   const [aiBusy, setAiBusy] = useState(false);
+  const [aiProgress, setAiProgress] = useState<string | null>(null);
   const [aiMessage, setAiMessage] = useState<string | null>(null);
   const [aiIncomeBusy, setAiIncomeBusy] = useState(false);
   const [aiIncomeMessage, setAiIncomeMessage] = useState<string | null>(null);
@@ -804,12 +805,16 @@ export function TransactionsManager({
   async function runAiCategorizeUncategorized() {
     setAiMessage(null);
     setAiBusy(true);
+    setAiProgress("Starting…");
     let total = 0;
     const BATCH = 100;
     let rounds = 0;
     const maxRounds = 20;
     try {
       while (rounds < maxRounds) {
+        setAiProgress(
+          `Analyzing batch ${rounds + 1}… ${total} categorized so far`,
+        );
         const r = await requestAutoCategorize();
         rounds += 1;
         if (!r.ok) {
@@ -861,6 +866,7 @@ export function TransactionsManager({
     } finally {
       // Always clear the busy flag so the button can't stay stuck on "Analyzing…".
       setAiBusy(false);
+      setAiProgress(null);
     }
   }
 
@@ -1012,9 +1018,7 @@ export function TransactionsManager({
               disabled={aiBusy || uncategorizedCount === 0}
               className="shrink-0 rounded-lg border border-violet-200 bg-violet-50 px-3 py-2 text-xs font-semibold text-violet-900 hover:bg-violet-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-violet-900/50 dark:bg-violet-950/40 dark:text-violet-100 dark:hover:bg-violet-950/60"
             >
-              {aiBusy
-                ? "Analyzing…"
-                : `AI: categorize (${uncategorizedCount})`}
+              {aiBusy ? "Analyzing…" : `AI: categorize (${uncategorizedCount})`}
             </button>
             <button
               type="button"
@@ -1178,6 +1182,16 @@ export function TransactionsManager({
             </div>
           ) : null}
         </div>
+        {aiProgress ? (
+          <p
+            className="flex items-center gap-2 border-b border-zinc-100 bg-violet-50/80 px-4 py-2 text-xs text-violet-900 dark:border-zinc-800 dark:bg-violet-950/40 dark:text-violet-100"
+            role="status"
+            aria-live="polite"
+          >
+            <span className="inline-block h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-violet-400 border-t-transparent" />
+            {aiProgress} — this can take a few minutes for a large ledger.
+          </p>
+        ) : null}
         {aiMessage ? (
           <p
             className="border-b border-zinc-100 bg-zinc-50 px-4 py-2 text-xs text-zinc-700 dark:border-zinc-800 dark:bg-zinc-950/60 dark:text-zinc-300"
