@@ -111,6 +111,17 @@ export function buildSavingsPromptInput(data: ReportData): string {
     }
   }
 
+  const feedback = (data.feedback ?? []).filter((f) => f.note.trim().length > 0);
+  if (feedback.length) {
+    lines.push(
+      "Household notes & constraints (the household told us these about their own spending — honor them: do not suggest cutting something they've said they can't or won't, respect commitments and corrections, and fold their context into your actions):",
+    );
+    for (const f of feedback) {
+      const label = f.category.trim() ? f.category.trim() : "General";
+      lines.push(`  - [${label}] ${f.note.trim()}`);
+    }
+  }
+
   return lines.join("\n");
 }
 
@@ -119,7 +130,11 @@ const SYSTEM_PROMPT =
   "lowest-effort ways this household can save money, and rank them by impact × ease — the " +
   "biggest, easiest wins first. Ground every number in the data provided; never invent a " +
   "figure that isn't there, and never estimate a monthly saving larger than the amount a " +
-  "category is over its trailing average. Return ONLY a JSON object (no markdown, no prose, " +
+  "category is over its trailing average. If the data includes household notes & " +
+  "constraints, treat them as authoritative: never recommend cutting something the " +
+  "household has said they can't or won't change, respect their stated commitments and " +
+  "corrections, and reflect that context in your actions (e.g. defer a change until a " +
+  "prepaid term ends rather than proposing to cancel it now). Return ONLY a JSON object (no markdown, no prose, " +
   "no code fences) matching exactly this shape:\n" +
   '{\n' +
   '  "headline": string,                // one plain-English sentence on the overall opportunity\n' +
