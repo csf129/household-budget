@@ -3,6 +3,14 @@
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { usePlaidLink } from "react-plaid-link";
+import {
+  clearPlaidLinkToken,
+  isPlaidOAuthRedirect,
+  loadPlaidLinkToken,
+  plaidOAuthRedirectHref,
+  savePlaidLinkToken,
+  stripPlaidOAuthParam,
+} from "@/lib/plaid-link-oauth";
 
 type Props = {
   bankConnectionId: string;
@@ -13,10 +21,18 @@ export function PlaidRelinkButton({ bankConnectionId, disabled = false }: Props)
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [linkToken, setLinkToken] = useState<string | null>(null);
+  const [receivedRedirectUri, setReceivedRedirectUri] = useState<
+    string | undefined
+  >(undefined);
   const [error, setError] = useState<string | null>(null);
+
+  // Per-connection flow key so only this row resumes its own OAuth redirect.
+  const linkFlow = `relink:${bankConnectionId}`;
 
   const onSuccess = useCallback(
     async (publicToken: string) => {
+      clearPlaidLinkToken(linkFlow);
+      stripPlaidOAuthParam();
       setError(null);
       setBusy(true);
       try {
@@ -41,14 +57,28 @@ export function PlaidRelinkButton({ bankConnectionId, disabled = false }: Props)
         setBusy(false);
       }
     },
-    [bankConnectionId, router],
+    [bankConnectionId, linkFlow, router],
   );
 
   const { open, ready } = usePlaidLink({
     token: linkToken,
+    receivedRedirectUri,
     onSuccess,
-    onExit: () => setLinkToken(null),
+    onExit: () => {
+      clearPlaidLinkToken(linkFlow);
+      stripPlaidOAuthParam();
+      setLinkToken(null);
+    },
   });
+
+  // Resume this row's relink after an OAuth bank redirected back (full reload).
+  useEffect(() => {
+    if (!isPlaidOAuthRedirect()) return;
+    const stashed = loadPlaidLinkToken(linkFlow);
+    if (!stashed) return;
+    setReceivedRedirectUri(plaidOAuthRedirectHref());
+    setLinkToken(stashed);
+  }, [linkFlow]);
 
   useEffect(() => {
     if (linkToken && ready) open();
@@ -68,6 +98,7 @@ export function PlaidRelinkButton({ bankConnectionId, disabled = false }: Props)
         setError(data.error || "Could not start relink.");
         return;
       }
+      savePlaidLinkToken(linkFlow, data.link_token);
       setLinkToken(data.link_token);
     } catch {
       setError("Network error while requesting relink token.");
