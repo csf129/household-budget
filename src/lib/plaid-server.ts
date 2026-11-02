@@ -62,6 +62,32 @@ export function getPlaidRedirectUri(): string | undefined {
   return uri || undefined;
 }
 
+/**
+ * Pull the real reason out of a failed Plaid API call. The Plaid SDK wraps
+ * errors as axios errors whose `.message` is only "Request failed with status
+ * code 400"; the actual cause lives in `response.data.error_code` /
+ * `error_message`. Returns a readable string (with the error_code appended) so
+ * routes surface the genuine reason instead of a generic HTTP message.
+ */
+export function plaidApiErrorMessage(e: unknown): {
+  message: string;
+  code?: string;
+} {
+  const data = (
+    e as {
+      response?: { data?: { error_code?: string; error_message?: string } };
+    }
+  )?.response?.data;
+  if (data?.error_code || data?.error_message) {
+    const base = data.error_message || "Plaid request failed.";
+    return {
+      message: data.error_code ? `${base} (${data.error_code})` : base,
+      code: data.error_code,
+    };
+  }
+  return { message: e instanceof Error ? e.message : "Plaid request failed." };
+}
+
 export function getPlaidWebhookUrl(): string | undefined {
   const full = process.env.PLAID_WEBHOOK_URL?.trim();
   if (full) return full;

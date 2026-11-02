@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { usePlaidLink } from "react-plaid-link";
+import { formatPlaidExitError } from "@/lib/plaid-link-error";
 import {
   clearPlaidLinkToken,
   isPlaidOAuthRedirect,
@@ -65,10 +66,14 @@ export function PlaidConnectPanel({
     token: linkToken,
     receivedRedirectUri,
     onSuccess,
-    onExit: () => {
+    onExit: (err) => {
       clearPlaidLinkToken(LINK_FLOW);
       stripPlaidOAuthParam();
       setLinkToken(null);
+      // Surface the real reason Link failed instead of swallowing it; null when
+      // the user just closed the dialog.
+      const msg = formatPlaidExitError(err);
+      if (msg) setError(msg);
     },
   });
 
@@ -138,10 +143,19 @@ export function PlaidConnectPanel({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({}),
       });
-      const data = (await res.json()) as { error?: string };
+      const data = (await res.json()) as {
+        error?: string;
+        errors?: { connection: string; error: string }[];
+      };
       if (!res.ok) {
         setError(data.error || "Sync failed.");
         return;
+      }
+      // The all-connections sync returns 200 even when individual banks fail
+      // (so one bad item never blocks the rest). Surface those per-connection
+      // errors instead of silently showing no new transactions.
+      if (data.errors && data.errors.length > 0) {
+        setError(data.errors.map((e) => e.error).join(" · "));
       }
       router.refresh();
     } catch {

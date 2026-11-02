@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getHouseholdForUser } from "@/lib/household";
-import { createPlaidClient } from "@/lib/plaid-server";
+import { createPlaidClient, plaidApiErrorMessage } from "@/lib/plaid-server";
 import { syncPlaidTransactionsForConnection } from "@/lib/plaid-sync";
 import { autoCategorizeUncategorizedForHousehold } from "@/lib/auto-categorize-household";
 import { getHouseholdAiModel } from "@/lib/get-household-ai-model";
@@ -132,8 +132,11 @@ export async function POST(request: Request) {
       );
       return NextResponse.json({ connections: 1, ...result, categorized });
     } catch (e) {
-      const msg = e instanceof Error ? e.message : "Sync failed.";
-      return NextResponse.json({ error: msg }, { status: 502 });
+      console.error("Plaid sync (single connection)", row.id, e);
+      return NextResponse.json(
+        { error: plaidApiErrorMessage(e).message },
+        { status: 502 },
+      );
     }
   }
 
@@ -151,6 +154,7 @@ export async function POST(request: Request) {
   let removed = 0;
   let ledger_replaced = 0;
   let has_more = false;
+  const errors: { connection: string; error: string }[] = [];
   const startedAt = Date.now();
   const budgetMs = 50_000; // stay under the platform function timeout
   for (const c of conns ?? []) {
@@ -173,6 +177,7 @@ export async function POST(request: Request) {
       if (r.has_more) has_more = true;
     } catch (e) {
       console.error("Plaid sync connection", c.id, e);
+      errors.push({ connection: c.id, error: plaidApiErrorMessage(e).message });
     }
   }
 
@@ -185,5 +190,6 @@ export async function POST(request: Request) {
     ledger_replaced,
     has_more,
     categorized,
+    errors,
   });
 }
