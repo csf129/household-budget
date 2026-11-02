@@ -2,6 +2,7 @@ import { PlaidConnectPanel } from "@/components/plaid-connect-panel";
 import { PlaidManualDedupePanel } from "@/components/plaid-manual-dedupe-panel";
 import { PlaidAccountsTable } from "@/components/plaid-accounts-table";
 import { PlaidRelinkButton } from "@/components/plaid-relink-button";
+import { PlaidRemoveConnectionButton } from "@/components/plaid-remove-connection-button";
 import { createClient } from "@/lib/supabase/server";
 import { getHouseholdForUser } from "@/lib/household";
 import { getPlaidEnv } from "@/lib/plaid-server";
@@ -38,6 +39,21 @@ export default async function SettingsBankPage() {
     .eq("household_id", household.householdId);
 
   const connError = connErr?.message || acctErr?.message || txCountErr?.message;
+
+  // Hide removed connections (and their accounts) from the UI. The rows stay in
+  // the database so historical transactions are preserved; they are simply no
+  // longer synced or shown.
+  const removedConnectionIds = new Set(
+    (connections ?? [])
+      .filter((c) => c.status === "removed")
+      .map((c) => String(c.id)),
+  );
+  const visibleConnections = (connections ?? []).filter(
+    (c) => !removedConnectionIds.has(String(c.id)),
+  );
+  const visibleBankAccounts = (bankAccounts ?? []).filter(
+    (a) => !removedConnectionIds.has(String(a.bank_connection_id)),
+  );
 
   // Only surface the server-env reminder when something is actually missing —
   // otherwise it reads as an error on a correctly configured deployment.
@@ -89,13 +105,13 @@ export default async function SettingsBankPage() {
         <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
           Linked institutions
         </h2>
-        {!connections?.length ? (
+        {!visibleConnections.length ? (
           <p className="mt-2 text-sm text-zinc-500 dark:text-zinc-500">
             No banks linked yet.
           </p>
         ) : (
           <ul className="mt-3 space-y-2 text-sm">
-            {connections.map((c) => (
+            {visibleConnections.map((c) => (
               <li
                 key={c.id}
                 className="rounded-lg border border-zinc-200 px-3 py-2 dark:border-zinc-700"
@@ -111,7 +127,13 @@ export default async function SettingsBankPage() {
                     Last sync: {new Date(c.last_sync_at).toLocaleString()}
                   </span>
                 ) : null}
-                <PlaidRelinkButton bankConnectionId={String(c.id)} />
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <PlaidRelinkButton bankConnectionId={String(c.id)} />
+                  <PlaidRemoveConnectionButton
+                    bankConnectionId={String(c.id)}
+                    institutionName={c.institution_name || "this bank"}
+                  />
+                </div>
               </li>
             ))}
           </ul>
@@ -122,13 +144,13 @@ export default async function SettingsBankPage() {
         <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
           Plaid accounts
         </h2>
-        {!bankAccounts?.length ? (
+        {!visibleBankAccounts.length ? (
           <p className="mt-2 text-sm text-zinc-500 dark:text-zinc-500">
             No accounts yet.
           </p>
         ) : (
           <PlaidAccountsTable
-            accounts={bankAccounts.map((a) => ({
+            accounts={visibleBankAccounts.map((a) => ({
               id: String(a.id),
               name: String(a.name ?? ""),
               display_name:
