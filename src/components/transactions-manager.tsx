@@ -16,7 +16,10 @@ import {
   applyDescriptionRules,
   buildDescriptionRuleMap,
 } from "@/lib/apply-description-rules";
-import { requestAutoCategorize } from "@/lib/auto-categorize-client";
+import {
+  requestAutoCategorize,
+  type AutoCategorizeResult,
+} from "@/lib/auto-categorize-client";
 import { formatUsd } from "@/lib/money";
 import { TransactionCsvImport } from "@/components/chase-csv-import";
 import { ReceiptPopover } from "@/components/receipt-popover";
@@ -805,37 +808,85 @@ export function TransactionsManager({
   async function runAiCategorizeUncategorized() {
     setAiMessage(null);
     setAiBusy(true);
-    setAiProgress("Starting…");
-    let total = 0;
+    setAiProgress("Preparing…");
+    // Per-request row cap (matches the route's MAX_TRANSACTIONS) and how many
+    // batches to run at once. Concurrency is kept modest because each request
+    // itself fans out into several parallel OpenAI calls server-side.
     const BATCH = 100;
-    let rounds = 0;
-    const maxRounds = 20;
+    const CONCURRENCY = 3;
+    let total = 0;
     try {
-      while (rounds < maxRounds) {
-        setAiProgress(
-          `Analyzing batch ${rounds + 1}… ${total} categorized so far`,
-        );
-        const r = await requestAutoCategorize();
-        rounds += 1;
-        if (!r.ok) {
-          if (r.code === "NO_AI_KEY") {
-            setAiMessage(
-              "Add OPENAI_API_KEY to your server .env.local to enable AI categorization.",
-            );
-          } else {
-            setAiMessage(r.error);
-          }
-          return;
-        }
-        total += r.updated;
-        if (r.updated === 0) break;
-        if ((r.considered ?? 0) < BATCH) break;
+      // Enumerate uncategorized rows from the loaded ledger (the same active
+      // rows the route would select), then split into disjoint batches so
+      // concurrent requests never process the same transaction twice.
+      const pendingIds = uniqueRows
+        .filter((r) => r.category_id == null)
+        .map((r) => r.id);
+
+      if (pendingIds.length === 0) {
+        setAiMessage("No uncategorized transactions to analyze.");
+        return;
       }
-      setAiMessage(
-        total === 0
-          ? "No changes. Either every transaction already has a category, or the model did not match any row to your categories."
-          : `Assigned categories to ${total} transaction${total === 1 ? "" : "s"} (up to ${BATCH} per request). Run again if more are uncategorized.`,
+
+      const batches: string[][] = [];
+      for (let i = 0; i < pendingIds.length; i += BATCH) {
+        batches.push(pendingIds.slice(i, i + BATCH));
+      }
+
+      let done = 0;
+      // Collected in an array (not a closure-assigned scalar) so TS keeps the
+      // element type instead of narrowing it to `never` after the loop.
+      const errors: Array<Extract<AutoCategorizeResult, { ok: false }>> = [];
+      const control = { stop: false };
+      const reportProgress = () =>
+        setAiProgress(
+          `Analyzing… ${done}/${batches.length} batches, ${total} categorized`,
+        );
+      reportProgress();
+
+      let nextIndex = 0;
+      async function worker() {
+        while (!control.stop && nextIndex < batches.length) {
+          const batch = batches[nextIndex++];
+          const r = await requestAutoCategorize(batch, {
+            tolerateMissing: true,
+          });
+          if (!r.ok) {
+            errors.push(r);
+            // A missing key fails every batch — stop early instead of retrying.
+            if (r.code === "NO_AI_KEY") control.stop = true;
+          } else {
+            total += r.updated;
+          }
+          done += 1;
+          reportProgress();
+        }
+      }
+
+      await Promise.all(
+        Array.from({ length: Math.min(CONCURRENCY, batches.length) }, () =>
+          worker(),
+        ),
       );
+
+      const firstError = errors[0];
+      if (firstError) {
+        if (firstError.code === "NO_AI_KEY") {
+          setAiMessage(
+            "Add OPENAI_API_KEY to your server .env.local to enable AI categorization.",
+          );
+        } else {
+          setAiMessage(
+            `Categorized ${total} transaction${total === 1 ? "" : "s"} before an error: ${firstError.error}`,
+          );
+        }
+      } else {
+        setAiMessage(
+          total === 0
+            ? "No changes. Either every transaction already has a category, or the model did not match any row to your categories."
+            : `Assigned categories to ${total} transaction${total === 1 ? "" : "s"}.`,
+        );
+      }
       // Always sync category_id from DB into client state. This fixes stale
       // state where a previous run updated the DB but router.refresh() failed
       // to propagate it.

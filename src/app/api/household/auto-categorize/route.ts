@@ -20,6 +20,12 @@ type Body = {
   transactionIds?: string[];
   /** When true (default), only rows still uncategorized are updated. */
   onlyUncategorized?: boolean;
+  /**
+   * When true, requested ids that are no longer found (already categorized,
+   * archived) are silently skipped instead of failing the whole batch. Used by
+   * the bulk client path, which enumerates ids from a client-side snapshot.
+   */
+  tolerateMissing?: boolean;
 };
 
 export async function POST(request: Request) {
@@ -109,7 +115,7 @@ export async function POST(request: Request) {
     });
   }
 
-  if (idsInput.length > 0) {
+  if (idsInput.length > 0 && body.tolerateMissing !== true) {
     const requested = new Set(idsInput);
     const found = new Set(rows.map((r) => String(r.id)));
     for (const id of requested) {

@@ -24,6 +24,7 @@ const REQUEST_TIMEOUT_MS = 70_000;
 
 export async function requestAutoCategorize(
   transactionIds?: string[],
+  options?: { tolerateMissing?: boolean },
 ): Promise<AutoCategorizeResult> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
@@ -40,6 +41,9 @@ export async function requestAutoCategorize(
             ? transactionIds
             : undefined,
         onlyUncategorized: true,
+        // In bulk mode the caller enumerates ids from a client-side snapshot;
+        // tolerate ids that were categorized meanwhile instead of failing the batch.
+        tolerateMissing: options?.tolerateMissing === true,
       }),
     });
   } catch (e) {
