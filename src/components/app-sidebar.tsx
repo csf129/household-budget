@@ -13,6 +13,7 @@ const nav = [
   { href: "/transactions", label: "Transactions" },
   { href: "/plans", label: "Plans" },
   { href: "/credit-cards", label: "Credit Cards" },
+  { href: "/report", label: "Report" },
   { href: "/alerts", label: "Alerts & Messages" },
   { href: "/settings/general", label: "Settings", headOnly: true },
 ] as const;
