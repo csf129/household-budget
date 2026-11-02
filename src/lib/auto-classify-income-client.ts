@@ -16,21 +16,58 @@ export type ClassifyIncomeResult =
  * Uses OpenAI to set per-transaction income_treatment (include/exclude) for
  * overview charts. Targets positive amounts; default body onlyUnset: true.
  */
+/** Abort a single request after this long so a hung call fails cleanly
+ * instead of leaving the caller stuck "Tagging…" forever. The server route
+ * caps itself at 60s (maxDuration), so give it a little headroom. */
+const REQUEST_TIMEOUT_MS = 70_000;
+
 export async function requestClassifyIncome(
   transactionIds?: string[],
   options?: { onlyUnset?: boolean },
 ): Promise<ClassifyIncomeResult> {
-  const res = await fetch("/api/household/classify-income", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      transactionIds:
-        transactionIds && transactionIds.length > 0 ? transactionIds : undefined,
-      onlyUnset: options?.onlyUnset !== false,
-    }),
-  });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
-  const data = (await res.json()) as Record<string, unknown>;
+  let res: Response;
+  try {
+    res = await fetch("/api/household/classify-income", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      signal: controller.signal,
+      body: JSON.stringify({
+        transactionIds:
+          transactionIds && transactionIds.length > 0
+            ? transactionIds
+            : undefined,
+        onlyUnset: options?.onlyUnset !== false,
+      }),
+    });
+  } catch (e) {
+    return {
+      ok: false,
+      error:
+        e instanceof DOMException && e.name === "AbortError"
+          ? "AI income tagging timed out. Try again."
+          : e instanceof Error
+            ? e.message
+            : "Network error contacting the server.",
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+
+  // A platform 504/500 can return HTML, not JSON; don't let .json() throw.
+  let data: Record<string, unknown> = {};
+  try {
+    data = (await res.json()) as Record<string, unknown>;
+  } catch {
+    if (!res.ok) {
+      return {
+        ok: false,
+        error: `Server error (${res.status} ${res.statusText || "unexpected response"}).`,
+      };
+    }
+  }
 
   if (res.ok) {
     return {

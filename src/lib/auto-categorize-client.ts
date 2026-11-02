@@ -17,20 +17,57 @@ export type AutoCategorizeResult =
  * (must belong to your household and typically be uncategorized).
  * If `transactionIds` is omitted or empty, categorizes up to 100 uncategorized rows.
  */
+/** Abort a single round after this long so a hung request fails cleanly
+ * instead of leaving the caller stuck "Analyzing…" forever. The server route
+ * caps itself at 60s (maxDuration), so give it a little headroom. */
+const REQUEST_TIMEOUT_MS = 70_000;
+
 export async function requestAutoCategorize(
   transactionIds?: string[],
 ): Promise<AutoCategorizeResult> {
-  const res = await fetch("/api/household/auto-categorize", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      transactionIds:
-        transactionIds && transactionIds.length > 0 ? transactionIds : undefined,
-      onlyUncategorized: true,
-    }),
-  });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
-  const data = (await res.json()) as Record<string, unknown>;
+  let res: Response;
+  try {
+    res = await fetch("/api/household/auto-categorize", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      signal: controller.signal,
+      body: JSON.stringify({
+        transactionIds:
+          transactionIds && transactionIds.length > 0
+            ? transactionIds
+            : undefined,
+        onlyUncategorized: true,
+      }),
+    });
+  } catch (e) {
+    return {
+      ok: false,
+      error:
+        e instanceof DOMException && e.name === "AbortError"
+          ? "AI categorization timed out. Try again."
+          : e instanceof Error
+            ? e.message
+            : "Network error contacting the server.",
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+
+  // A platform 504/500 can return HTML, not JSON; don't let .json() throw.
+  let data: Record<string, unknown> = {};
+  try {
+    data = (await res.json()) as Record<string, unknown>;
+  } catch {
+    if (!res.ok) {
+      return {
+        ok: false,
+        error: `Server error (${res.status} ${res.statusText || "unexpected response"}).`,
+      };
+    }
+  }
 
   if (res.ok) {
     return {

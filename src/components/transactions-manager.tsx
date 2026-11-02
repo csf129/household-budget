@@ -808,73 +808,89 @@ export function TransactionsManager({
     const BATCH = 100;
     let rounds = 0;
     const maxRounds = 20;
-    while (rounds < maxRounds) {
-      const r = await requestAutoCategorize();
-      rounds += 1;
-      if (!r.ok) {
-        setAiBusy(false);
-        if (r.code === "NO_AI_KEY") {
-          setAiMessage(
-            "Add OPENAI_API_KEY to your server .env.local to enable AI categorization.",
-          );
-        } else {
-          setAiMessage(r.error);
+    try {
+      while (rounds < maxRounds) {
+        const r = await requestAutoCategorize();
+        rounds += 1;
+        if (!r.ok) {
+          if (r.code === "NO_AI_KEY") {
+            setAiMessage(
+              "Add OPENAI_API_KEY to your server .env.local to enable AI categorization.",
+            );
+          } else {
+            setAiMessage(r.error);
+          }
+          return;
         }
-        return;
+        total += r.updated;
+        if (r.updated === 0) break;
+        if ((r.considered ?? 0) < BATCH) break;
       }
-      total += r.updated;
-      if (r.updated === 0) break;
-      if ((r.considered ?? 0) < BATCH) break;
-    }
-    setAiBusy(false);
-    setAiMessage(
-      total === 0
-        ? "No changes. Either every transaction already has a category, or the model did not match any row to your categories."
-        : `Assigned categories to ${total} transaction${total === 1 ? "" : "s"} (up to ${BATCH} per request). Run again if more are uncategorized.`,
-    );
-    // Always sync category_id from DB into client state. This fixes stale state
-    // where a previous run updated the DB but router.refresh() failed to propagate it.
-    {
-      const supabase = createClient();
-      const { data: freshCats } = await supabase
-        .from("transactions")
-        .select("id, category_id")
-        .eq("household_id", householdId)
-        .not("category_id", "is", null);
-      if (freshCats && freshCats.length > 0) {
-        const catMap = new Map(
-          freshCats.map((r) => [String(r.id), r.category_id ? String(r.category_id) : null]),
-        );
-        setRows((prev) =>
-          prev.map((row) => {
-            const newCat = catMap.get(row.id);
-            return newCat !== undefined ? { ...row, category_id: newCat } : row;
-          }),
-        );
+      setAiMessage(
+        total === 0
+          ? "No changes. Either every transaction already has a category, or the model did not match any row to your categories."
+          : `Assigned categories to ${total} transaction${total === 1 ? "" : "s"} (up to ${BATCH} per request). Run again if more are uncategorized.`,
+      );
+      // Always sync category_id from DB into client state. This fixes stale
+      // state where a previous run updated the DB but router.refresh() failed
+      // to propagate it.
+      {
+        const supabase = createClient();
+        const { data: freshCats } = await supabase
+          .from("transactions")
+          .select("id, category_id")
+          .eq("household_id", householdId)
+          .not("category_id", "is", null);
+        if (freshCats && freshCats.length > 0) {
+          const catMap = new Map(
+            freshCats.map((r) => [String(r.id), r.category_id ? String(r.category_id) : null]),
+          );
+          setRows((prev) =>
+            prev.map((row) => {
+              const newCat = catMap.get(row.id);
+              return newCat !== undefined ? { ...row, category_id: newCat } : row;
+            }),
+          );
+        }
       }
+      router.refresh();
+    } catch (e) {
+      setAiMessage(
+        e instanceof Error ? e.message : "Unexpected error during AI categorization.",
+      );
+    } finally {
+      // Always clear the busy flag so the button can't stay stuck on "Analyzing…".
+      setAiBusy(false);
     }
-    router.refresh();
   }
 
   async function runAiClassifyIncome() {
     setAiIncomeMessage(null);
     setAiIncomeBusy(true);
-    const r = await requestClassifyIncome();
-    setAiIncomeBusy(false);
-    if (!r.ok) {
-      if (r.code === "NO_AI_KEY") {
-        setAiIncomeMessage(
-          "Add OPENAI_API_KEY to .env.local to enable AI income tagging.",
-        );
-      } else {
-        setAiIncomeMessage(r.error);
+    try {
+      const r = await requestClassifyIncome();
+      if (!r.ok) {
+        if (r.code === "NO_AI_KEY") {
+          setAiIncomeMessage(
+            "Add OPENAI_API_KEY to .env.local to enable AI income tagging.",
+          );
+        } else {
+          setAiIncomeMessage(r.error);
+        }
+        return;
       }
-      return;
+      setAiIncomeMessage(
+        r.message ?? `Tagged ${r.updated} credit${r.updated === 1 ? "" : "s"}.`,
+      );
+      router.refresh();
+    } catch (e) {
+      setAiIncomeMessage(
+        e instanceof Error ? e.message : "Unexpected error during AI income tagging.",
+      );
+    } finally {
+      // Always clear the busy flag so the button can't stay stuck on "Tagging…".
+      setAiIncomeBusy(false);
     }
-    setAiIncomeMessage(
-      r.message ?? `Tagged ${r.updated} credit${r.updated === 1 ? "" : "s"}.`,
-    );
-    router.refresh();
   }
 
   const editMatchCount = editingTx
