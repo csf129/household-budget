@@ -159,7 +159,20 @@ export async function assembleReportData(
       cat && curBucket
         ? effectiveMonthlyBudgetForDateRange(cat, curBucket.start, curBucket.end)
         : null;
-    return { ...s, monthlyBudget };
+    // A plain flat monthly budget (or no budget yet) can be edited inline;
+    // seasonal / annual / weekly / recurring budgets are left to Settings.
+    const budgetEditableInline =
+      cat != null &&
+      cat.budget_amount_period === "month" &&
+      cat.budget_active_from_month == null &&
+      cat.budget_period_start == null &&
+      !cat.budget_recurring_payment;
+    return {
+      ...s,
+      categoryId: cat?.id ?? null,
+      monthlyBudget,
+      budgetEditableInline,
+    };
   });
 
   const last = months.length - 1;

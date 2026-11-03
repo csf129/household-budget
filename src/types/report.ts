@@ -38,6 +38,30 @@ export type ReportCategorySeries = SeriesStats & {
    * reference line on the report's per-category plots.
    */
   monthlyBudget?: number | null;
+  /** The category id this series maps to, when it maps to exactly one. */
+  categoryId?: string | null;
+  /**
+   * True when the budget is a plain flat monthly amount (or unset) and so can
+   * be safely edited inline from the plot. False for seasonal / annual / weekly
+   * / recurring budgets, which must be edited on the Settings screen so their
+   * extra configuration isn't clobbered.
+   */
+  budgetEditableInline?: boolean;
+};
+
+/** One recorded change to a category's monthly budget, for the audit view. */
+export type BudgetChange = {
+  id: string;
+  /** Category display name as it was when the change was made. */
+  categoryName: string;
+  /** Previous monthly_budget value (null = none set). */
+  oldAmount: number | null;
+  /** New monthly_budget value (null = cleared). */
+  newAmount: number | null;
+  source: "report" | "settings";
+  createdAt: string;
+  /** True when the signed-in user made this change. */
+  changedByMe: boolean;
 };
 
 /** One calendar month of household totals. */

@@ -18,6 +18,7 @@ import {
 import { getChartAxisTheme, hearthColorFor } from "@/lib/chart-palette";
 import { formatUsd, formatUsdCompact } from "@/lib/money";
 import type {
+  BudgetChange,
   ReportCategorySeries,
   ReportData,
   ReportFeedback,
@@ -443,6 +444,152 @@ function SavingsAnalysisView({
 }
 
 /**
+ * The budget line's legend entry on a plot, which doubles as an inline editor
+ * for household heads when the budget is a simple flat monthly amount.
+ */
+function BudgetEditor({
+  categoryId,
+  value,
+  editable,
+  canEdit,
+  color,
+  onSaved,
+}: {
+  categoryId: string | null;
+  value: number | null;
+  editable: boolean;
+  canEdit: boolean;
+  color: string;
+  onSaved: (next: number | null) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(value != null ? String(value) : "");
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const swatch = (
+    <span
+      aria-hidden
+      className="inline-block h-0 w-4 shrink-0 border-t-2"
+      style={{ borderColor: color }}
+    />
+  );
+
+  const canInlineEdit = canEdit && editable && categoryId != null;
+
+  const save = async (next: number | null) => {
+    setSaving(true);
+    setErr(null);
+    try {
+      const res = await fetch("/api/household/report/budget", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ categoryId, monthlyBudget: next }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json?.error ?? `Request failed (${res.status})`);
+      onSaved((json.monthlyBudget ?? null) as number | null);
+      setEditing(false);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (editing) {
+    const parsed = Number(draft.replace(/[$,\s]/g, ""));
+    const valid = draft.trim() === "" || Number.isFinite(parsed);
+    return (
+      <span className="inline-flex flex-wrap items-center gap-1.5">
+        {swatch}
+        <span className="text-zinc-500 dark:text-zinc-400">Budget $</span>
+        <input
+          type="text"
+          inputMode="decimal"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          autoFocus
+          placeholder="0"
+          className="w-20 rounded border border-zinc-300 bg-white px-1.5 py-0.5 text-xs text-zinc-800 outline-none focus:border-violet-400 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
+        />
+        <button
+          type="button"
+          disabled={saving || !valid}
+          onClick={() => save(draft.trim() === "" ? null : Math.max(0, parsed))}
+          className="rounded bg-violet-600 px-2 py-0.5 text-xs font-medium text-white hover:bg-violet-500 disabled:opacity-60"
+        >
+          {saving ? "Saving…" : "Save"}
+        </button>
+        <button
+          type="button"
+          disabled={saving}
+          onClick={() => {
+            setEditing(false);
+            setDraft(value != null ? String(value) : "");
+            setErr(null);
+          }}
+          className="rounded px-1.5 py-0.5 text-xs font-medium text-zinc-500 hover:bg-zinc-100 disabled:opacity-60 dark:text-zinc-400 dark:hover:bg-zinc-800"
+        >
+          Cancel
+        </button>
+        {value != null ? (
+          <button
+            type="button"
+            disabled={saving}
+            onClick={() => save(null)}
+            className="text-xs font-medium text-red-600 hover:underline disabled:opacity-60 dark:text-red-400"
+          >
+            Clear
+          </button>
+        ) : null}
+        {err ? <span className="text-xs text-red-600 dark:text-red-400">{err}</span> : null}
+      </span>
+    );
+  }
+
+  if (value != null) {
+    return (
+      <span className="inline-flex items-center gap-1.5">
+        {swatch}
+        <span>budget {formatUsd(value)}</span>
+        {canInlineEdit ? (
+          <button
+            type="button"
+            onClick={() => {
+              setDraft(String(value));
+              setEditing(true);
+            }}
+            className="font-medium text-violet-600 hover:underline dark:text-violet-300"
+          >
+            Edit
+          </button>
+        ) : canEdit && !editable ? (
+          <span className="text-zinc-400">· edit in Settings</span>
+        ) : null}
+      </span>
+    );
+  }
+
+  // No budget set.
+  if (canInlineEdit) {
+    return (
+      <button
+        type="button"
+        onClick={() => {
+          setDraft("");
+          setEditing(true);
+        }}
+        className="inline-flex items-center gap-1 font-medium text-violet-600 hover:underline dark:text-violet-300"
+      >
+        + Set a monthly budget
+      </button>
+    );
+  }
+  return null;
+}
+
+/**
  * One category's monthly spend as bars, plus a dashed average line across the
  * window. Each month has a clickable circle on the average line: click it to
  * drop that month from the average (and re-add it). Clicking a bar asks the
@@ -452,13 +599,20 @@ function CategoryPlot({
   category,
   months,
   onBarClick,
+  canEditBudget,
 }: {
   category: ReportCategorySeries;
   months: ReportData["months"];
   onBarClick: (monthKey: string) => void;
+  canEditBudget: boolean;
 }) {
   // Month indices the user excluded from the average (outliers).
   const [excluded, setExcluded] = useState<Set<number>>(() => new Set());
+  // The currently-set monthly budget, kept local so an inline edit updates the
+  // line immediately without refetching the whole report.
+  const [budgetValue, setBudgetValue] = useState<number | null>(
+    category.monthlyBudget != null ? Math.round(category.monthlyBudget) : null,
+  );
 
   const { resolvedTheme } = useTheme();
   const isDark = resolvedTheme === "dark";
@@ -471,12 +625,8 @@ function CategoryPlot({
       ? includedValues.reduce((a, b) => a + b, 0) / includedValues.length
       : 0;
 
-  // The household's currently-set monthly budget for this category, drawn as a
-  // flat reference line when set.
-  const budget =
-    category.monthlyBudget != null && category.monthlyBudget > 0
-      ? Math.round(category.monthlyBudget)
-      : null;
+  // Drawn as a flat reference line when a positive budget is set.
+  const budget = budgetValue != null && budgetValue > 0 ? budgetValue : null;
 
   const chartData = months.map((m, i) => ({
     label: m.label.replace(/ \d{4}$/, ""),
@@ -627,7 +777,7 @@ function CategoryPlot({
         </ResponsiveContainer>
       </div>
 
-      <p className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-zinc-500 dark:text-zinc-400">
+      <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-zinc-500 dark:text-zinc-400">
         <span className="inline-flex items-center gap-1">
           <span
             aria-hidden
@@ -636,18 +786,16 @@ function CategoryPlot({
           />
           average — click a point to include/exclude a month
         </span>
-        {budget != null ? (
-          <span className="inline-flex items-center gap-1">
-            <span
-              aria-hidden
-              className="inline-block h-0 w-4 border-t-2"
-              style={{ borderColor: c.budgetLine }}
-            />
-            budget {formatUsd(budget)}
-          </span>
-        ) : null}
+        <BudgetEditor
+          categoryId={category.categoryId ?? null}
+          value={budgetValue}
+          editable={category.budgetEditableInline ?? false}
+          canEdit={canEditBudget}
+          color={c.budgetLine}
+          onSaved={setBudgetValue}
+        />
         <span>click a bar for its transactions</span>
-      </p>
+      </div>
     </div>
   );
 }
@@ -740,17 +888,136 @@ function TransactionsModal({
   );
 }
 
+/** Modal listing the household's recent monthly-budget changes (audit trail). */
+function BudgetHistoryModal({ onClose }: { onClose: () => void }) {
+  const [changes, setChanges] = useState<BudgetChange[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/household/report/budget")
+      .then(async (res) => {
+        const json = await res.json();
+        if (!res.ok) throw new Error(json?.error ?? `Request failed (${res.status})`);
+        return json as { changes: BudgetChange[] };
+      })
+      .then((json) => {
+        if (!cancelled) setChanges(json.changes);
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const fmt = (n: number | null) => (n == null ? "—" : formatUsd(n));
+  const fmtDate = (iso: string) => {
+    const d = new Date(iso);
+    return Number.isNaN(d.getTime())
+      ? iso.slice(0, 10)
+      : d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  };
+
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[150] flex items-center justify-center bg-black/40 p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Budget change history"
+      onClick={onClose}
+    >
+      <div
+        className="max-h-[85vh] w-full max-w-lg overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-xl dark:border-zinc-700 dark:bg-zinc-900"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-start justify-between gap-3 border-b border-zinc-200 p-4 dark:border-zinc-800">
+          <div>
+            <h2 className="font-semibold text-zinc-900 dark:text-zinc-100">Budget changes</h2>
+            <p className="text-sm text-zinc-500 dark:text-zinc-400">
+              Who changed a monthly budget, from what to what, and when.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            className="shrink-0 rounded-md px-2 py-1 text-sm text-zinc-500 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"
+          >
+            ✕
+          </button>
+        </div>
+        <div className="max-h-[65vh] overflow-y-auto">
+          {error ? (
+            <p className="p-4 text-sm text-red-600 dark:text-red-400" role="alert">
+              Could not load history: {error}
+            </p>
+          ) : changes == null ? (
+            <p className="p-4 text-sm text-zinc-500 dark:text-zinc-400">Loading…</p>
+          ) : changes.length === 0 ? (
+            <p className="p-4 text-sm text-zinc-500 dark:text-zinc-400">
+              No budget changes recorded yet.
+            </p>
+          ) : (
+            <ul className="divide-y divide-zinc-100 dark:divide-zinc-800">
+              {changes.map((ch) => (
+                <li key={ch.id} className="flex items-start justify-between gap-3 px-4 py-2.5">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm text-zinc-800 dark:text-zinc-200">
+                      {ch.categoryName}
+                    </p>
+                    <p className="text-xs text-zinc-400">
+                      {fmtDate(ch.createdAt)}
+                      {ch.changedByMe ? " · you" : ""}
+                      {ch.source === "settings" ? " · Settings" : ""}
+                    </p>
+                  </div>
+                  <span className="shrink-0 text-sm tabular-nums text-zinc-700 dark:text-zinc-300">
+                    {fmt(ch.oldAmount)} <span className="text-zinc-400">→</span>{" "}
+                    <span className="font-medium text-zinc-900 dark:text-zinc-100">
+                      {fmt(ch.newAmount)}
+                    </span>
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
 /**
  * The "Individual" tab: one plot per spending category, with a filter box and a
  * transactions drill-down. Transactions are loaded once for the window and
  * grouped client-side for instant popups.
  */
-function IndividualTab({ data, months }: { data: ReportData; months: number }) {
+function IndividualTab({
+  data,
+  months,
+  canEditBudget,
+}: {
+  data: ReportData;
+  months: number;
+  canEditBudget: boolean;
+}) {
   const [payload, setPayload] = useState<ReportTransactionsPayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState("");
   const [popup, setPopup] = useState<{ category: string; monthKey: string } | null>(null);
+  const [showHistory, setShowHistory] = useState(false);
 
   // This component is remounted via `key={months}` when the window changes, so
   // initial state (loading=true, no payload) already covers the reset — the
@@ -808,13 +1075,22 @@ function IndividualTab({ data, months }: { data: ReportData; months: number }) {
           Each category&apos;s spend by month, with the average across the window. Click a point on
           the average line to drop or re-add a month; click a bar to see its transactions.
         </p>
-        <input
-          type="search"
-          value={filter}
-          onChange={(e) => setFilter(e.target.value)}
-          placeholder="Filter categories…"
-          className="w-full rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-sm text-zinc-800 outline-none focus:border-violet-400 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 sm:w-56"
-        />
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setShowHistory(true)}
+            className="shrink-0 rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-sm font-medium text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
+          >
+            Budget history
+          </button>
+          <input
+            type="search"
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            placeholder="Filter categories…"
+            className="w-full rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-sm text-zinc-800 outline-none focus:border-violet-400 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 sm:w-56"
+          />
+        </div>
       </div>
 
       {loading ? (
@@ -840,6 +1116,7 @@ function IndividualTab({ data, months }: { data: ReportData; months: number }) {
               category={c}
               months={data.months}
               onBarClick={(monthKey) => setPopup({ category: c.name, monthKey })}
+              canEditBudget={canEditBudget}
             />
           ))}
         </div>
@@ -853,11 +1130,19 @@ function IndividualTab({ data, months }: { data: ReportData; months: number }) {
           onClose={() => setPopup(null)}
         />
       ) : null}
+
+      {showHistory ? <BudgetHistoryModal onClose={() => setShowHistory(false)} /> : null}
     </div>
   );
 }
 
-export function ReportView({ householdName }: { householdName: string }) {
+export function ReportView({
+  householdName,
+  canEditBudget,
+}: {
+  householdName: string;
+  canEditBudget: boolean;
+}) {
   const [months, setMonths] = useState(6);
   const [data, setData] = useState<ReportData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -1036,7 +1321,12 @@ export function ReportView({ householdName }: { householdName: string }) {
       </div>
 
       {tab === "individual" ? (
-        <IndividualTab key={months} data={data} months={months} />
+        <IndividualTab
+          key={months}
+          data={data}
+          months={months}
+          canEditBudget={canEditBudget}
+        />
       ) : (
       <div className="space-y-6">
       {/* Overview */}

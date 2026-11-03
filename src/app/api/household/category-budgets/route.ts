@@ -72,11 +72,11 @@ export async function PATCH(request: Request) {
   const supabase = await createClient();
   const auth = await requireHouseholdHead(supabase);
   if (auth instanceof NextResponse) return auth;
-  const { household } = auth;
+  const { user, household } = auth;
 
   const { data: cats, error: catErr } = await supabase
     .from("categories")
-    .select("id")
+    .select("id,name,parent_category_id,monthly_budget")
     .eq("household_id", household.householdId);
 
   if (catErr) {
@@ -84,6 +84,28 @@ export async function PATCH(request: Request) {
   }
 
   const allowed = new Set((cats ?? []).map((c) => String(c.id)));
+  const catById = new Map(
+    (cats ?? []).map((c) => [String(c.id), c as Record<string, unknown>] as const),
+  );
+  const displayNameFor = (id: string): string => {
+    const c = catById.get(id);
+    if (!c) return "";
+    const name = String(c.name ?? "");
+    const pid = c.parent_category_id ? String(c.parent_category_id) : null;
+    const parentName = pid ? String(catById.get(pid)?.name ?? "") : "";
+    return parentName ? `${parentName} › ${name}` : name;
+  };
+  // Monthly-budget changes to record after each successful update, so the
+  // report's budget-change history captures Settings edits too.
+  const budgetAudits: {
+    household_id: string;
+    category_id: string;
+    category_name: string;
+    old_amount: number | null;
+    new_amount: number | null;
+    changed_by: string;
+    source: "settings";
+  }[] = [];
 
   for (const u of updates) {
     const id =
@@ -256,6 +278,28 @@ export async function PATCH(request: Request) {
     if (upErr) {
       return NextResponse.json({ error: upErr.message }, { status: 500 });
     }
+
+    const prev = catById.get(id);
+    const oldAmount =
+      prev && prev.monthly_budget != null && Number.isFinite(Number(prev.monthly_budget))
+        ? Number(prev.monthly_budget)
+        : null;
+    if (oldAmount !== value) {
+      budgetAudits.push({
+        household_id: household.householdId,
+        category_id: id,
+        category_name: displayNameFor(id),
+        old_amount: oldAmount,
+        new_amount: value,
+        changed_by: user.id,
+        source: "settings",
+      });
+    }
+  }
+
+  // Best-effort: never fail the save because the audit insert did.
+  if (budgetAudits.length > 0) {
+    await supabase.from("category_budget_changes").insert(budgetAudits);
   }
 
   return NextResponse.json({ saved: updates.length });

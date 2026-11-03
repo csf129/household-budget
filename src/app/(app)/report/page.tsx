@@ -1,6 +1,7 @@
 import { ReportView } from "@/components/report-view";
 import { createClient } from "@/lib/supabase/server";
-import { getHouseholdForUser } from "@/lib/household";
+import { getHouseholdForUser, isHead } from "@/lib/household";
+import { getViewContext } from "@/lib/view-as";
 
 export default async function ReportPage() {
   const supabase = await createClient();
@@ -11,6 +12,10 @@ export default async function ReportPage() {
 
   const household = await getHouseholdForUser(supabase, user.id);
   if (!household) return null;
+
+  // Budgets are a head-only setting; family members see the report read-only.
+  const view = await getViewContext(supabase, household.role);
+  const canEditBudget = isHead(view.effectiveRole);
 
   return (
     <div className="space-y-8">
@@ -25,7 +30,7 @@ export default async function ReportPage() {
         </p>
       </div>
 
-      <ReportView householdName={household.name} />
+      <ReportView householdName={household.name} canEditBudget={canEditBudget} />
     </div>
   );
 }
