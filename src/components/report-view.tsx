@@ -444,10 +444,12 @@ function SavingsAnalysisView({
 }
 
 /**
- * The budget line's legend entry on a plot, which doubles as an inline editor
- * for household heads when the budget is a simple flat monthly amount.
+ * Always-editable monthly-budget box, shown at the top of a plot. A household
+ * head can change the value and Save at any time (no edit toggle); after a save
+ * it shows what the budget was before. Read-only for family members and for
+ * complex (seasonal / annual / recurring) budgets, which are edited on Settings.
  */
-function BudgetEditor({
+function BudgetBox({
   categoryId,
   value,
   editable,
@@ -462,8 +464,9 @@ function BudgetEditor({
   color: string;
   onSaved: (next: number | null) => void;
 }) {
-  const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value != null ? String(value) : "");
+  // The budget as it was before the most recent save, for comparison.
+  const [prev, setPrev] = useState<number | null>(value);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -477,19 +480,45 @@ function BudgetEditor({
 
   const canInlineEdit = canEdit && editable && categoryId != null;
 
-  const save = async (next: number | null) => {
+  // Read-only: family members, or complex budgets (edited on Settings).
+  if (!canInlineEdit) {
+    if (value == null) return null;
+    return (
+      <div className="flex flex-wrap items-center gap-1.5 text-xs text-zinc-500 dark:text-zinc-400">
+        {swatch}
+        <span>
+          Budget{" "}
+          <span className="font-semibold text-zinc-700 dark:text-zinc-300">
+            {formatUsd(value)}
+          </span>
+        </span>
+        {canEdit && !editable ? <span className="text-zinc-400">· edit in Settings</span> : null}
+      </div>
+    );
+  }
+
+  const parsed = Number(draft.replace(/[$,\s]/g, ""));
+  const validNum = draft.trim() === "" || Number.isFinite(parsed);
+  const nextVal = draft.trim() === "" ? null : Math.max(0, parsed);
+  const dirty = nextVal !== value;
+  const changed = prev !== value; // a save moved the value this session
+
+  const save = async () => {
+    if (!validNum) return;
     setSaving(true);
     setErr(null);
     try {
       const res = await fetch("/api/household/report/budget", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ categoryId, monthlyBudget: next }),
+        body: JSON.stringify({ categoryId, monthlyBudget: nextVal }),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json?.error ?? `Request failed (${res.status})`);
-      onSaved((json.monthlyBudget ?? null) as number | null);
-      setEditing(false);
+      const saved = (json.monthlyBudget ?? null) as number | null;
+      setPrev(value);
+      onSaved(saved);
+      setDraft(saved != null ? String(saved) : "");
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
     } finally {
@@ -497,96 +526,40 @@ function BudgetEditor({
     }
   };
 
-  if (editing) {
-    const parsed = Number(draft.replace(/[$,\s]/g, ""));
-    const valid = draft.trim() === "" || Number.isFinite(parsed);
-    return (
-      <span className="inline-flex flex-wrap items-center gap-1.5">
-        {swatch}
-        <span className="text-zinc-500 dark:text-zinc-400">Budget $</span>
+  return (
+    <div className="flex flex-wrap items-center gap-1.5 text-xs">
+      {swatch}
+      <label className="flex items-center gap-1 text-zinc-500 dark:text-zinc-400">
+        Budget $
         <input
           type="text"
           inputMode="decimal"
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
-          autoFocus
-          placeholder="0"
-          className="w-20 rounded border border-zinc-300 bg-white px-1.5 py-0.5 text-xs text-zinc-800 outline-none focus:border-violet-400 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
-        />
-        <button
-          type="button"
-          disabled={saving || !valid}
-          onClick={() => save(draft.trim() === "" ? null : Math.max(0, parsed))}
-          className="rounded bg-violet-600 px-2 py-0.5 text-xs font-medium text-white hover:bg-violet-500 disabled:opacity-60"
-        >
-          {saving ? "Saving…" : "Save"}
-        </button>
-        <button
-          type="button"
-          disabled={saving}
-          onClick={() => {
-            setEditing(false);
-            setDraft(value != null ? String(value) : "");
-            setErr(null);
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && dirty && validNum) save();
           }}
-          className="rounded px-1.5 py-0.5 text-xs font-medium text-zinc-500 hover:bg-zinc-100 disabled:opacity-60 dark:text-zinc-400 dark:hover:bg-zinc-800"
-        >
-          Cancel
-        </button>
-        {value != null ? (
-          <button
-            type="button"
-            disabled={saving}
-            onClick={() => save(null)}
-            className="text-xs font-medium text-red-600 hover:underline disabled:opacity-60 dark:text-red-400"
-          >
-            Clear
-          </button>
-        ) : null}
-        {err ? <span className="text-xs text-red-600 dark:text-red-400">{err}</span> : null}
-      </span>
-    );
-  }
-
-  if (value != null) {
-    return (
-      <span className="inline-flex items-center gap-1.5">
-        {swatch}
-        <span>budget {formatUsd(value)}</span>
-        {canInlineEdit ? (
-          <button
-            type="button"
-            onClick={() => {
-              setDraft(String(value));
-              setEditing(true);
-            }}
-            className="font-medium text-violet-600 hover:underline dark:text-violet-300"
-          >
-            Edit
-          </button>
-        ) : canEdit && !editable ? (
-          <span className="text-zinc-400">· edit in Settings</span>
-        ) : null}
-      </span>
-    );
-  }
-
-  // No budget set.
-  if (canInlineEdit) {
-    return (
+          placeholder="—"
+          aria-label="Monthly budget"
+          className="w-24 rounded border border-zinc-300 bg-white px-1.5 py-0.5 text-right text-xs text-zinc-800 outline-none focus:border-violet-400 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
+        />
+      </label>
       <button
         type="button"
-        onClick={() => {
-          setDraft("");
-          setEditing(true);
-        }}
-        className="inline-flex items-center gap-1 font-medium text-violet-600 hover:underline dark:text-violet-300"
+        disabled={saving || !validNum || !dirty}
+        onClick={save}
+        className="rounded bg-violet-600 px-2 py-0.5 text-xs font-medium text-white hover:bg-violet-500 disabled:opacity-50"
       >
-        + Set a monthly budget
+        {saving ? "Saving…" : "Save"}
       </button>
-    );
-  }
-  return null;
+      {changed ? (
+        <span className="text-zinc-400 dark:text-zinc-500">
+          was {prev != null ? formatUsd(prev) : "none"}
+        </span>
+      ) : null}
+      {err ? <span className="text-red-600 dark:text-red-400">{err}</span> : null}
+    </div>
+  );
 }
 
 /**
@@ -670,6 +643,17 @@ function CategoryPlot({
             <span className="text-zinc-400"> · {excluded.size} excluded</span>
           ) : null}
         </div>
+      </div>
+
+      <div className="mt-2">
+        <BudgetBox
+          categoryId={category.categoryId ?? null}
+          value={budgetValue}
+          editable={category.budgetEditableInline ?? false}
+          canEdit={canEditBudget}
+          color={c.budgetLine}
+          onSaved={setBudgetValue}
+        />
       </div>
 
       <div className="mt-3 h-56 w-full min-w-0">
@@ -786,14 +770,16 @@ function CategoryPlot({
           />
           average — click a point to include/exclude a month
         </span>
-        <BudgetEditor
-          categoryId={category.categoryId ?? null}
-          value={budgetValue}
-          editable={category.budgetEditableInline ?? false}
-          canEdit={canEditBudget}
-          color={c.budgetLine}
-          onSaved={setBudgetValue}
-        />
+        {budget != null ? (
+          <span className="inline-flex items-center gap-1">
+            <span
+              aria-hidden
+              className="inline-block h-0 w-4 border-t-2"
+              style={{ borderColor: c.budgetLine }}
+            />
+            budget line
+          </span>
+        ) : null}
         <span>click a bar for its transactions</span>
       </div>
     </div>
