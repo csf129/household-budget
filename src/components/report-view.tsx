@@ -18,6 +18,7 @@ import { formatUsd, formatUsdCompact } from "@/lib/money";
 import type {
   ReportCategorySeries,
   ReportData,
+  ReportFeedback,
   ReportTransaction,
   ReportTransactionsPayload,
   SavingsAnalysis,
@@ -173,7 +174,156 @@ const EFFORT_META: Record<
   },
 };
 
-function SavingsAnalysisView({ analysis }: { analysis: SavingsAnalysis }) {
+/** Build the category→note lookup the editors read from. "" = general note. */
+function notesFromFeedback(feedback: ReportFeedback[] | undefined): Record<string, string> {
+  const map: Record<string, string> = {};
+  for (const f of feedback ?? []) {
+    const note = f.note.trim();
+    if (note) map[f.category] = note;
+  }
+  return map;
+}
+
+type SaveNote = (category: string, note: string) => Promise<void>;
+
+/**
+ * Add / edit / clear a household note for one category (or the general note
+ * when `category` is ""). Notes persist and feed back into future AI analysis.
+ */
+function NoteEditor({
+  category,
+  value,
+  onSave,
+  addLabel = "Add a note",
+  placeholder = "Add context for your assistant — e.g. a fixed commitment, a plan already in motion, or a correction.",
+}: {
+  category: string;
+  value: string;
+  onSave: SaveNote;
+  addLabel?: string;
+  placeholder?: string;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(value);
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  // `draft` seeds from `value` on mount. When the saved value changes
+  // externally (a save completes, or the month switches), the parent remounts
+  // this editor via a `key` tied to `value`, so there's no setState-in-effect
+  // sync to do here.
+
+  const save = async (next: string) => {
+    setSaving(true);
+    setErr(null);
+    try {
+      await onSave(category, next);
+      setEditing(false);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (!editing) {
+    if (value) {
+      return (
+        <div className="mt-3 rounded-lg border border-violet-200 bg-violet-50/60 px-3 py-2 dark:border-violet-900/50 dark:bg-violet-950/30">
+          <div className="flex items-start justify-between gap-2">
+            <p className="min-w-0 whitespace-pre-wrap break-words text-sm text-violet-900 dark:text-violet-100">
+              <span aria-hidden className="mr-1">📝</span>
+              {value}
+            </p>
+            <button
+              type="button"
+              onClick={() => {
+                setDraft(value);
+                setEditing(true);
+              }}
+              className="shrink-0 text-xs font-medium text-violet-700 hover:underline dark:text-violet-300"
+            >
+              Edit
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return (
+      <button
+        type="button"
+        onClick={() => {
+          setDraft("");
+          setEditing(true);
+        }}
+        className="mt-3 inline-flex items-center gap-1 text-xs font-medium text-violet-600 hover:underline dark:text-violet-300"
+      >
+        + {addLabel}
+      </button>
+    );
+  }
+
+  return (
+    <div className="mt-3">
+      <textarea
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        placeholder={placeholder}
+        rows={3}
+        maxLength={1000}
+        autoFocus
+        className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-800 outline-none focus:border-violet-400 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
+      />
+      {err ? (
+        <p className="mt-1 text-xs text-red-600 dark:text-red-400" role="alert">
+          {err}
+        </p>
+      ) : null}
+      <div className="mt-2 flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => save(draft)}
+          disabled={saving}
+          className="rounded-md bg-violet-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-violet-500 disabled:opacity-60"
+        >
+          {saving ? "Saving…" : "Save note"}
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setEditing(false);
+            setDraft(value);
+            setErr(null);
+          }}
+          disabled={saving}
+          className="rounded-md px-3 py-1.5 text-xs font-medium text-zinc-600 hover:bg-zinc-100 disabled:opacity-60 dark:text-zinc-300 dark:hover:bg-zinc-800"
+        >
+          Cancel
+        </button>
+        {value ? (
+          <button
+            type="button"
+            onClick={() => save("")}
+            disabled={saving}
+            className="ml-auto text-xs font-medium text-red-600 hover:underline disabled:opacity-60 dark:text-red-400"
+          >
+            Clear
+          </button>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function SavingsAnalysisView({
+  analysis,
+  notes,
+  onSaveNote,
+}: {
+  analysis: SavingsAnalysis;
+  notes: Record<string, string>;
+  onSaveNote: SaveNote;
+}) {
   const { opportunities, totalMonthlySaving, headline, shortlist } = analysis;
   const maxSaving = Math.max(...opportunities.map((o) => o.estMonthlySaving), 1);
 
@@ -259,6 +409,15 @@ function SavingsAnalysisView({ analysis }: { analysis: SavingsAnalysis }) {
                   <span>{o.action}</span>
                 </p>
               ) : null}
+
+              <NoteEditor
+                key={`${o.category}:${notes[o.category] ?? ""}`}
+                category={o.category}
+                value={notes[o.category] ?? ""}
+                onSave={onSaveNote}
+                addLabel={`Add a note about ${o.category}`}
+                placeholder={`e.g. why ${o.category} can't change right now, or what you're already doing about it.`}
+              />
             </li>
           );
         })}
@@ -634,6 +793,10 @@ export function ReportView({ householdName }: { householdName: string }) {
 
   const [tab, setTab] = useState<"overview" | "individual">("overview");
 
+  // Household notes keyed by category ("" = general). Seeded from the report
+  // payload and kept in sync as the user edits them.
+  const [notes, setNotes] = useState<Record<string, string>>({});
+
   // Switching the window resets view state here (an event handler, not an
   // effect) so the fetch effect below never calls setState synchronously.
   const changeMonths = useCallback((next: number) => {
@@ -643,6 +806,7 @@ export function ReportView({ householdName }: { householdName: string }) {
     setData(null);
     setInsights(null);
     setInsightsError(null);
+    setNotes({});
   }, []);
 
   useEffect(() => {
@@ -654,7 +818,10 @@ export function ReportView({ householdName }: { householdName: string }) {
         return json as ReportData;
       })
       .then((json) => {
-        if (!cancelled) setData(json);
+        if (!cancelled) {
+          setData(json);
+          setNotes(notesFromFeedback(json.feedback));
+        }
       })
       .catch((err: unknown) => {
         if (!cancelled) setError(err instanceof Error ? err.message : String(err));
@@ -682,6 +849,25 @@ export function ReportView({ householdName }: { householdName: string }) {
       )
       .finally(() => setInsightsLoading(false));
   }, [months]);
+
+  // Persist a household note, then reflect it locally so the editors and the
+  // next analysis stay in sync. Throws on failure so the editor can surface it.
+  const saveNote = useCallback(async (category: string, note: string) => {
+    const res = await fetch("/api/household/report/feedback", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ category, note }),
+    });
+    const json = await res.json();
+    if (!res.ok) throw new Error(json?.error ?? `Request failed (${res.status})`);
+    setNotes((prev) => {
+      const next = { ...prev };
+      const trimmed = note.trim();
+      if (trimmed) next[category] = trimmed;
+      else delete next[category];
+      return next;
+    });
+  }, []);
 
   const chartData = useMemo(
     () =>
@@ -931,18 +1117,60 @@ export function ReportView({ householdName }: { householdName: string }) {
           </button>
         }
       >
-        {insightsError ? (
-          <p className="text-sm text-red-600 dark:text-red-400" role="alert">
-            {insightsError}
-          </p>
-        ) : insights ? (
-          <SavingsAnalysisView analysis={insights} />
-        ) : (
-          <p className="text-sm text-zinc-500 dark:text-zinc-400">
-            Run your household&apos;s AI assistant over this report to get a prioritized,
-            plain-English plan for where to cut spending first.
-          </p>
-        )}
+        <div className="space-y-5">
+          {insightsError ? (
+            <p className="text-sm text-red-600 dark:text-red-400" role="alert">
+              {insightsError}
+            </p>
+          ) : insights ? (
+            <SavingsAnalysisView analysis={insights} notes={notes} onSaveNote={saveNote} />
+          ) : (
+            <p className="text-sm text-zinc-500 dark:text-zinc-400">
+              Run your household&apos;s AI assistant over this report to get a prioritized,
+              plain-English plan for where to cut spending first.
+            </p>
+          )}
+
+          {/* Notes for your assistant — persisted and fed into every future run */}
+          {(() => {
+            const opportunityCats = new Set((insights?.opportunities ?? []).map((o) => o.category));
+            const otherNotes = Object.entries(notes).filter(
+              ([cat, note]) => cat !== "" && note.trim() && !opportunityCats.has(cat),
+            );
+            return (
+              <div className="rounded-xl border border-zinc-200 bg-zinc-50/80 p-4 dark:border-zinc-800 dark:bg-zinc-900/60">
+                <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+                  Notes for your assistant
+                </div>
+                <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                  Saved with your household and fed into every future analysis, so the plan
+                  respects commitments, plans already in motion, and your corrections.
+                </p>
+                <NoteEditor
+                  key={`general:${notes[""] ?? ""}`}
+                  category=""
+                  value={notes[""] ?? ""}
+                  onSave={saveNote}
+                  addLabel="Add a general note"
+                  placeholder="e.g. We prepaid karate for 6 months, so that bill can't change until spring."
+                />
+                {otherNotes.length > 0 ? (
+                  <div className="mt-4 space-y-3 border-t border-zinc-200 pt-3 dark:border-zinc-800">
+                    <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+                      Saved notes
+                    </div>
+                    {otherNotes.map(([cat, note]) => (
+                      <div key={cat}>
+                        <div className="text-xs font-medium text-zinc-700 dark:text-zinc-300">{cat}</div>
+                        <NoteEditor key={note} category={cat} value={note} onSave={saveNote} />
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            );
+          })()}
+        </div>
       </Card>
       </div>
       )}

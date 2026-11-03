@@ -98,6 +98,24 @@ export type SavingsOpportunity = {
 };
 
 /**
+ * One household note about the report that persists across regenerations and is
+ * fed back into future AI savings analysis (both the in-app deep-dive and the
+ * `/budget-report` skill artifact). Notes are shared household context.
+ */
+export type ReportFeedback = {
+  /**
+   * The savings area / category the note is about (e.g. "Karate",
+   * "Food & drink"), matching a `SavingsOpportunity.category` where possible.
+   * An empty string is a general, report-wide note.
+   */
+  category: string;
+  /** The household's free-text note / constraint / correction. */
+  note: string;
+  /** ISO timestamp the note was last saved. */
+  updatedAt: string;
+};
+
+/**
  * Structured "where to save the most, easiest first" analysis the AI returns,
  * rendered as a graphical breakdown rather than prose. Every figure is grounded
  * in `ReportData`.
@@ -161,4 +179,9 @@ export type ReportData = {
   categories: ReportCategorySeries[];
   creditCards: ReportCreditCard[];
   savingsPlans: ReportSavingsPlan[];
+  /**
+   * Household notes on the report, carried from prior sessions so the AI
+   * analysis can honor the household's own constraints and corrections.
+   */
+  feedback: ReportFeedback[];
 };

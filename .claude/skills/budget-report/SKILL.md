@@ -53,8 +53,8 @@ summary.
    `income`, `spending`, `net`), `totals` (current vs trailing average),
    `categories[]` (each with a `series`, `current`, `previous`, `momDelta`,
    `momPct`, `trendDelta`, and `direction` of `up`/`down`/`flat`),
-   `creditCards[]`, and `savingsPlans[]`. All money is USD; spending is a
-   positive number.
+   `creditCards[]`, `savingsPlans[]`, and `feedback[]` (household notes — see
+   below). All money is USD; spending is a positive number.
 
 5. **Build the report Artifact.** First load the `artifact-design` and
    `dataviz` skills, then publish a scrollable HTML page with these sections,
@@ -108,6 +108,28 @@ short "do these first" shortlist with a rough total monthly saving.
 
 Ground every number in the JSON. If a figure isn't in the data, say so rather
 than guessing. Round dollars; don't imply false precision.
+
+### Honor the household's notes (`feedback[]`)
+
+`report.json` carries a `feedback[]` array: notes the household saved on earlier
+reports, each with a `category` (the area it's about — matches a spending
+category / opportunity name; `""` means a general, report-wide note) and a
+`note` (their own words). These persist across reports and are the household's
+own context, so treat them as **authoritative** when building the deep-dive:
+
+- **Never** recommend cutting something a note says they can't or won't change
+  (e.g. a prepaid commitment, a medical need, a kid's activity they're keeping).
+- Respect plans already in motion and corrections ("we already cancelled this",
+  "that charge is actually annual") — don't re-suggest them or double-count.
+- Fold the constraint into the action instead of dropping the opportunity: if a
+  bill is fixed until a prepaid term ends, note *when* it can be revisited
+  rather than proposing to cancel it now.
+- When a note explains an overage, reflect that in how you frame (or de-rank)
+  that opportunity.
+
+If you surface an opportunity that a note directly addresses, acknowledge the
+note so the household sees they were heard. These are the same notes the in-app
+report collects, so the artifact and the app stay consistent.
 
 ## Guardrails
 
