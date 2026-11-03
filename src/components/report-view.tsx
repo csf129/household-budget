@@ -1063,6 +1063,19 @@ function IndividualTab({
     return q ? withSpend.filter((c) => c.name.toLowerCase().includes(q)) : withSpend;
   }, [data.categories, filter]);
 
+  // Window summary across ALL categories (not the filtered list): the total
+  // monthly spend averaged over the window — i.e. the per-plot "avg" figures
+  // added up — versus the average monthly income.
+  const summary = useMemo(() => {
+    const n = data.months.length || 1;
+    const avgIncome = data.months.reduce((s, m) => s + m.income, 0) / n;
+    const avgSpend = data.categories.reduce(
+      (s, c) => s + c.series.reduce((a, b) => a + b, 0) / n,
+      0,
+    );
+    return { n, avgIncome, avgSpend, diff: avgIncome - avgSpend };
+  }, [data.months, data.categories]);
+
   const popupTx = popup ? txByKey.get(`${popup.category}\u0000${popup.monthKey}`) ?? [] : [];
   const popupMonthLabel = popup
     ? data.months.find((m) => m.key === popup.monthKey)?.label ?? popup.monthKey
@@ -1091,6 +1104,33 @@ function IndividualTab({
             className="w-full rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-sm text-zinc-800 outline-none focus:border-violet-400 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 sm:w-56"
           />
         </div>
+      </div>
+
+      {/* Totals across all categories vs. average monthly income */}
+      <div className="grid gap-4 sm:grid-cols-3">
+        <Stat
+          label="Avg spend · all categories"
+          value={formatUsd(summary.avgSpend)}
+          sub={`monthly average over ${summary.n} months`}
+        />
+        <Stat label="Avg monthly income" value={formatUsd(summary.avgIncome)} />
+        <Stat
+          label="Income − spending"
+          value={formatUsd(summary.diff)}
+          sub={
+            <span
+              className={
+                summary.diff >= 0
+                  ? "text-emerald-600 dark:text-emerald-400"
+                  : "text-red-600 dark:text-red-400"
+              }
+            >
+              {summary.diff >= 0
+                ? "left over each month on average"
+                : "over income on average"}
+            </span>
+          }
+        />
       </div>
 
       {loading ? (
