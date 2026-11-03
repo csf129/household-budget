@@ -20,9 +20,41 @@ export function getChartAxisTheme(isDark: boolean) {
       (isDark ? "border-zinc-700 text-zinc-400" : "border-zinc-100 text-zinc-500"),
     incomeLine: isDark ? "mt-1 text-emerald-400" : "mt-1 text-emerald-700",
     spendLine: isDark ? "mt-1 text-sky-400" : "mt-1 text-blue-700",
-    barIncome: isDark ? "#22c55e" : "#16a34a",
-    barSpend: isDark ? "#3b82f6" : "#2563eb",
+    // Data-series colors, aligned with the Hearth app's calm, earthy palette
+    // (mobile/src/shared/theme.js in the Hearth repo), tuned per theme so they
+    // stay legible on both the light and dark chart surfaces. Income stays a
+    // green and spend a blue so existing legends/captions still read true.
+    barIncome: isDark ? "#89a98f" : "#4a6b57",
+    barSpend: isDark ? "#6aa0c2" : "#3f6f8a",
+    /** Net line (income − spend): Hearth's clay accent. */
+    netLine: isDark ? "#c0896a" : "#8a5a44",
+    /** Average reference line: Hearth's muted gold. */
+    avgLine: isDark ? "#d0a74e" : "#b8913a",
+    /** Budget reference line: Hearth's muted plum (distinct from the others). */
+    budgetLine: isDark ? "#a284b2" : "#7a5c8a",
   };
+}
+
+/**
+ * Hearth's earthy categorical palette (the `SWATCHES` from the Hearth app's
+ * mobile/src/shared/theme.js). Used to color per-category bars so the report
+ * reads like the rest of the family's apps. Theme-independent: each swatch is a
+ * mid-tone that works on both light and dark chart surfaces.
+ */
+export const HEARTH_SWATCHES = [
+  "#4a6b57", "#6d8a72", "#2f7a6a", "#5c8a7a",
+  "#3f6f8a", "#4a7fa8", "#7a5c8a", "#9a6f9e",
+  "#c25b7c", "#a8502f", "#c07a3e", "#b8913a",
+  "#8a5a44", "#8a7a5c", "#5d6b73", "#6b6b6b",
+] as const;
+
+/** Stable Hearth swatch for a category name (deterministic hash → palette). */
+export function hearthColorFor(name: string): string {
+  let h = 0;
+  for (let i = 0; i < name.length; i++) {
+    h = (h * 31 + name.charCodeAt(i)) >>> 0;
+  }
+  return HEARTH_SWATCHES[h % HEARTH_SWATCHES.length]!;
 }
 
 /** Default Recharts `<Tooltip contentStyle={...} />` for pie and built-in tooltips. */

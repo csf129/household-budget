@@ -32,6 +32,12 @@ export type ReportCategorySeries = SeriesStats & {
   color: string;
   /** Spend per month, aligned with `ReportData.months` (oldest → newest). */
   series: number[];
+  /**
+   * The household's currently-set monthly budget for this category (effective
+   * for the latest complete month), or null when no budget is set. Drawn as a
+   * reference line on the report's per-category plots.
+   */
+  monthlyBudget?: number | null;
 };
 
 /** One calendar month of household totals. */

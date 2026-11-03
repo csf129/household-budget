@@ -15,7 +15,8 @@ import type {
 import type { PeriodBucket } from "@/lib/dashboard-analytics";
 import { fetchAllHouseholdTransactions } from "@/lib/fetch-household-transactions";
 import { mapTransactionRow } from "@/lib/map-transaction";
-import { mapCategoryRowFromSupabase } from "@/lib/category-display";
+import { formatCategoryLabel, mapCategoryRowFromSupabase } from "@/lib/category-display";
+import { effectiveMonthlyBudgetForDateRange } from "@/lib/category-budget-season";
 import { attachPrimaryGroupsFromCategoryCatalog } from "@/lib/attach-primary-group-to-transactions";
 import {
   aggregateCategorySpendingInRange,
@@ -144,7 +145,22 @@ export async function assembleReportData(
     });
   }
 
-  const categories = buildCategorySeries(perBucketCat);
+  const categoriesBase = buildCategorySeries(perBucketCat);
+  // Attach each category's currently-set monthly budget (effective for the
+  // latest complete month) by matching the series' display name to a category,
+  // so the per-category plots can draw a budget reference line.
+  const curBucket = buckets[buckets.length - 1];
+  const catByLabel = new Map(
+    categoryRows.map((cat) => [formatCategoryLabel(cat, categoryRows), cat] as const),
+  );
+  const categories = categoriesBase.map((s) => {
+    const cat = catByLabel.get(s.name);
+    const monthlyBudget =
+      cat && curBucket
+        ? effectiveMonthlyBudgetForDateRange(cat, curBucket.start, curBucket.end)
+        : null;
+    return { ...s, monthlyBudget };
+  });
 
   const last = months.length - 1;
   const priorMonths = last > 0 ? months.slice(0, last) : [];
