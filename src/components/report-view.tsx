@@ -1,9 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   Bar,
   CartesianGrid,
+  Cell,
   Legend,
   Line,
   ComposedChart,
@@ -17,6 +19,8 @@ import type {
   ReportCategorySeries,
   ReportData,
   ReportFeedback,
+  ReportTransaction,
+  ReportTransactionsPayload,
   SavingsAnalysis,
   SavingsEffort,
 } from "@/types/report";
@@ -24,6 +28,10 @@ import type {
 const INCOME_COLOR = "#16a34a";
 const SPENDING_COLOR = "#7c3aed";
 const NET_COLOR = "#0ea5e9";
+const AVG_LINE_COLOR = "#f59e0b";
+
+/** Props Recharts passes to a custom `dot` renderer (only the bits we use). */
+type DotRenderProps = { cx?: number; cy?: number; index?: number; [k: string]: unknown };
 
 const BILL_HINTS = [
   "electric",
@@ -437,6 +445,342 @@ function SavingsAnalysisView({
   );
 }
 
+/**
+ * One category's monthly spend as bars, plus a dashed average line across the
+ * window. Each month has a clickable circle on the average line: click it to
+ * drop that month from the average (and re-add it). Clicking a bar asks the
+ * parent to open that month's transactions.
+ */
+function CategoryPlot({
+  category,
+  months,
+  onBarClick,
+}: {
+  category: ReportCategorySeries;
+  months: ReportData["months"];
+  onBarClick: (monthKey: string) => void;
+}) {
+  // Month indices the user excluded from the average (outliers).
+  const [excluded, setExcluded] = useState<Set<number>>(() => new Set());
+
+  const series = category.series;
+  const includedValues = series.filter((_, i) => !excluded.has(i));
+  const average =
+    includedValues.length > 0
+      ? includedValues.reduce((a, b) => a + b, 0) / includedValues.length
+      : 0;
+
+  const chartData = months.map((m, i) => ({
+    label: m.label.replace(/ \d{4}$/, ""),
+    key: m.key,
+    spend: Math.round(series[i] ?? 0),
+    avg: Math.round(average),
+    idx: i,
+  }));
+
+  const toggle = (i: number) =>
+    setExcluded((prev) => {
+      const next = new Set(prev);
+      if (next.has(i)) next.delete(i);
+      else next.add(i);
+      return next;
+    });
+
+  const color = category.color || SPENDING_COLOR;
+
+  return (
+    <div className="rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900/60">
+      <div className="flex items-baseline justify-between gap-2">
+        <h3 className="truncate font-medium text-zinc-900 dark:text-zinc-100" title={category.name}>
+          {category.name}
+        </h3>
+        <div className="shrink-0 text-right text-xs text-zinc-500 dark:text-zinc-400">
+          avg{" "}
+          <span className="font-semibold text-zinc-800 dark:text-zinc-200">{formatUsd(average)}</span>
+          {excluded.size > 0 ? <span className="text-zinc-400"> · {excluded.size} excluded</span> : null}
+        </div>
+      </div>
+
+      <div className="mt-3 h-52 w-full">
+        <ResponsiveContainer width="100%" height="100%">
+          <ComposedChart data={chartData} margin={{ top: 8, right: 8, bottom: 0, left: 8 }}>
+            <CartesianGrid
+              strokeDasharray="3 3"
+              stroke="currentColor"
+              className="text-zinc-200 dark:text-zinc-800"
+            />
+            <XAxis dataKey="label" tick={{ fontSize: 11 }} />
+            <YAxis tickFormatter={(v) => formatUsdCompact(Number(v))} tick={{ fontSize: 11 }} width={48} />
+            <Tooltip formatter={(v) => formatUsd(Number(v))} />
+            <Bar dataKey="spend" name="Spend" radius={[3, 3, 0, 0]} cursor="pointer">
+              {chartData.map((d) => (
+                <Cell
+                  key={d.key}
+                  fill={color}
+                  fillOpacity={excluded.has(d.idx) ? 0.3 : 0.9}
+                  onClick={() => onBarClick(d.key)}
+                />
+              ))}
+            </Bar>
+            <Line
+              dataKey="avg"
+              name="Average"
+              stroke={AVG_LINE_COLOR}
+              strokeWidth={2}
+              strokeDasharray="5 4"
+              isAnimationActive={false}
+              activeDot={false}
+              dot={(props: DotRenderProps) => {
+                const { cx, cy, index } = props;
+                const i = index ?? -1;
+                if (cx == null || cy == null) return <g key={`d${i}`} />;
+                const off = excluded.has(i);
+                return (
+                  <g key={`d${i}`}>
+                    {/* larger invisible hit target for easier clicking */}
+                    <circle
+                      cx={cx}
+                      cy={cy}
+                      r={11}
+                      fill="transparent"
+                      style={{ cursor: "pointer" }}
+                      onClick={() => toggle(i)}
+                    />
+                    <circle
+                      cx={cx}
+                      cy={cy}
+                      r={5}
+                      className={off ? "fill-white dark:fill-zinc-900" : undefined}
+                      fill={off ? undefined : AVG_LINE_COLOR}
+                      stroke={AVG_LINE_COLOR}
+                      strokeWidth={2}
+                      style={{ cursor: "pointer" }}
+                      onClick={() => toggle(i)}
+                    />
+                  </g>
+                );
+              }}
+            />
+          </ComposedChart>
+        </ResponsiveContainer>
+      </div>
+
+      <p className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-zinc-400 dark:text-zinc-500">
+        <span className="inline-flex items-center gap-1">
+          <span aria-hidden className="inline-block h-2 w-4 border-t-2 border-dashed" style={{ borderColor: AVG_LINE_COLOR }} />
+          average — click a point to include/exclude a month
+        </span>
+        <span>click a bar for its transactions</span>
+      </p>
+    </div>
+  );
+}
+
+/** Modal listing the transactions behind one category/month bar. */
+function TransactionsModal({
+  category,
+  monthLabel,
+  transactions,
+  onClose,
+}: {
+  category: string;
+  monthLabel: string;
+  transactions: ReportTransaction[];
+  onClose: () => void;
+}) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const total = transactions.reduce((a, t) => a + t.amount, 0);
+  const sorted = [...transactions].sort((a, b) => (a.occurredOn < b.occurredOn ? 1 : -1));
+
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[150] flex items-center justify-center bg-black/40 p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-label={`${category} transactions for ${monthLabel}`}
+      onClick={onClose}
+    >
+      <div
+        className="max-h-[85vh] w-full max-w-lg overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-xl dark:border-zinc-700 dark:bg-zinc-900"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-start justify-between gap-3 border-b border-zinc-200 p-4 dark:border-zinc-800">
+          <div className="min-w-0">
+            <h2 className="truncate font-semibold text-zinc-900 dark:text-zinc-100">{category}</h2>
+            <p className="text-sm text-zinc-500 dark:text-zinc-400">
+              {monthLabel} · {transactions.length} transaction{transactions.length === 1 ? "" : "s"} ·{" "}
+              {formatUsd(total)}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            className="shrink-0 rounded-md px-2 py-1 text-sm text-zinc-500 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"
+          >
+            ✕
+          </button>
+        </div>
+        <div className="max-h-[65vh] overflow-y-auto">
+          {sorted.length === 0 ? (
+            <p className="p-4 text-sm text-zinc-500 dark:text-zinc-400">
+              No transactions for this month.
+            </p>
+          ) : (
+            <ul className="divide-y divide-zinc-100 dark:divide-zinc-800">
+              {sorted.map((t, i) => (
+                <li
+                  key={`${t.occurredOn}-${i}`}
+                  className="flex items-center justify-between gap-3 px-4 py-2.5"
+                >
+                  <div className="min-w-0">
+                    <p className="truncate text-sm text-zinc-800 dark:text-zinc-200">{t.description}</p>
+                    <p className="text-xs tabular-nums text-zinc-400">{t.occurredOn}</p>
+                  </div>
+                  <span
+                    className={`shrink-0 text-sm tabular-nums ${
+                      t.amount < 0
+                        ? "text-emerald-600 dark:text-emerald-400"
+                        : "text-zinc-900 dark:text-zinc-100"
+                    }`}
+                  >
+                    {formatUsd(t.amount)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
+/**
+ * The "Individual" tab: one plot per spending category, with a filter box and a
+ * transactions drill-down. Transactions are loaded once for the window and
+ * grouped client-side for instant popups.
+ */
+function IndividualTab({ data, months }: { data: ReportData; months: number }) {
+  const [payload, setPayload] = useState<ReportTransactionsPayload | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [filter, setFilter] = useState("");
+  const [popup, setPopup] = useState<{ category: string; monthKey: string } | null>(null);
+
+  // This component is remounted via `key={months}` when the window changes, so
+  // initial state (loading=true, no payload) already covers the reset — the
+  // effect only fetches and sets state in async callbacks (no sync setState).
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/household/report/transactions?months=${months}`)
+      .then(async (res) => {
+        const json = await res.json();
+        if (!res.ok) throw new Error(json?.error ?? `Request failed (${res.status})`);
+        return json as ReportTransactionsPayload;
+      })
+      .then((json) => {
+        if (!cancelled) setPayload(json);
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [months]);
+
+  // Group transactions by category + month for O(1) popup lookup. "\u0000" is a
+  // safe separator (can't appear in a category name).
+  const txByKey = useMemo(() => {
+    const map = new Map<string, ReportTransaction[]>();
+    for (const it of payload?.items ?? []) {
+      const k = `${it.category}\u0000${it.monthKey}`;
+      const arr = map.get(k);
+      if (arr) arr.push(it);
+      else map.set(k, [it]);
+    }
+    return map;
+  }, [payload]);
+
+  const categories = useMemo(() => {
+    const q = filter.trim().toLowerCase();
+    const withSpend = data.categories.filter((c) => c.series.some((v) => v !== 0));
+    return q ? withSpend.filter((c) => c.name.toLowerCase().includes(q)) : withSpend;
+  }, [data.categories, filter]);
+
+  const popupTx = popup ? txByKey.get(`${popup.category}\u0000${popup.monthKey}`) ?? [] : [];
+  const popupMonthLabel = popup
+    ? data.months.find((m) => m.key === popup.monthKey)?.label ?? popup.monthKey
+    : "";
+
+  return (
+    <div className="space-y-5">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <p className="max-w-xl text-sm text-zinc-500 dark:text-zinc-400">
+          Each category&apos;s spend by month, with the average across the window. Click a point on
+          the average line to drop or re-add a month; click a bar to see its transactions.
+        </p>
+        <input
+          type="search"
+          value={filter}
+          onChange={(e) => setFilter(e.target.value)}
+          placeholder="Filter categories…"
+          className="w-full rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-sm text-zinc-800 outline-none focus:border-violet-400 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 sm:w-56"
+        />
+      </div>
+
+      {loading ? (
+        <p className="text-sm text-zinc-500 dark:text-zinc-400">Loading transactions…</p>
+      ) : error ? (
+        <p
+          className="rounded-xl border border-red-200 bg-red-50/80 p-4 text-sm text-red-700 dark:border-red-900/40 dark:bg-red-950/40 dark:text-red-300"
+          role="alert"
+        >
+          Could not load transactions: {error}
+        </p>
+      ) : categories.length === 0 ? (
+        <p className="text-sm text-zinc-500 dark:text-zinc-400">
+          {filter.trim()
+            ? "No categories match your filter."
+            : "No spending categories in this window."}
+        </p>
+      ) : (
+        <div className="grid gap-4 lg:grid-cols-2">
+          {categories.map((c) => (
+            <CategoryPlot
+              key={`${c.name}-${months}`}
+              category={c}
+              months={data.months}
+              onBarClick={(monthKey) => setPopup({ category: c.name, monthKey })}
+            />
+          ))}
+        </div>
+      )}
+
+      {popup ? (
+        <TransactionsModal
+          category={popup.category}
+          monthLabel={popupMonthLabel}
+          transactions={popupTx}
+          onClose={() => setPopup(null)}
+        />
+      ) : null}
+    </div>
+  );
+}
+
 export function ReportView({ householdName }: { householdName: string }) {
   const [months, setMonths] = useState(6);
   const [data, setData] = useState<ReportData | null>(null);
@@ -446,6 +790,8 @@ export function ReportView({ householdName }: { householdName: string }) {
   const [insights, setInsights] = useState<SavingsAnalysis | null>(null);
   const [insightsLoading, setInsightsLoading] = useState(false);
   const [insightsError, setInsightsError] = useState<string | null>(null);
+
+  const [tab, setTab] = useState<"overview" | "individual">("overview");
 
   // Household notes keyed by category ("" = general). Seeded from the report
   // payload and kept in sync as the user edits them.
@@ -587,8 +933,31 @@ export function ReportView({ householdName }: { householdName: string }) {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-end">{monthPicker}</div>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="inline-flex rounded-lg border border-zinc-200 bg-zinc-100/70 p-0.5 text-sm dark:border-zinc-800 dark:bg-zinc-900">
+          {(["overview", "individual"] as const).map((t) => (
+            <button
+              key={t}
+              type="button"
+              onClick={() => setTab(t)}
+              aria-pressed={tab === t}
+              className={`rounded-md px-3 py-1.5 font-medium capitalize transition-colors ${
+                tab === t
+                  ? "bg-white text-zinc-900 shadow-sm dark:bg-zinc-700 dark:text-zinc-100"
+                  : "text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-200"
+              }`}
+            >
+              {t}
+            </button>
+          ))}
+        </div>
+        {monthPicker}
+      </div>
 
+      {tab === "individual" ? (
+        <IndividualTab key={months} data={data} months={months} />
+      ) : (
+      <div className="space-y-6">
       {/* Overview */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Stat
@@ -803,6 +1172,8 @@ export function ReportView({ householdName }: { householdName: string }) {
           })()}
         </div>
       </Card>
+      </div>
+      )}
     </div>
   );
 }
