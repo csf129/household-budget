@@ -4,7 +4,12 @@ import type {
   PrimaryCategoryGroupRow,
   TransactionRow,
 } from "@/types/finance";
-import type { ReportData, ReportMonth, ReportCreditCard } from "@/types/report";
+import type {
+  ReportData,
+  ReportMonth,
+  ReportCreditCard,
+  ReportFeedback,
+} from "@/types/report";
 import type { PeriodBucket } from "@/lib/dashboard-analytics";
 import { fetchAllHouseholdTransactions } from "@/lib/fetch-household-transactions";
 import { mapTransactionRow } from "@/lib/map-transaction";
@@ -186,6 +191,23 @@ export async function assembleReportData(
     pace: p.total_saved - p.expected_by_today,
   }));
 
+  // Household notes on the report, carried across regenerations so the AI
+  // analysis respects the household's own constraints. Best-effort: a missing
+  // table or read error must not break the whole report.
+  const { data: feedbackRows } = await supabase
+    .from("report_feedback")
+    .select("category,note,updated_at")
+    .eq("household_id", householdId)
+    .order("updated_at", { ascending: false });
+
+  const feedback: ReportFeedback[] = (feedbackRows ?? [])
+    .map((r) => ({
+      category: String((r as Record<string, unknown>).category ?? ""),
+      note: String((r as Record<string, unknown>).note ?? "").trim(),
+      updatedAt: String((r as Record<string, unknown>).updated_at ?? ""),
+    }))
+    .filter((f) => f.note.length > 0);
+
   return {
     householdName,
     generatedAt: new Date().toISOString(),
@@ -195,5 +217,6 @@ export async function assembleReportData(
     categories,
     creditCards,
     savingsPlans,
+    feedback,
   };
 }
