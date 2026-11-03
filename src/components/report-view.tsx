@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
+import { useTheme } from "next-themes";
 import {
   Bar,
   CartesianGrid,
@@ -14,6 +15,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+import { getChartAxisTheme } from "@/lib/chart-palette";
 import { formatUsd, formatUsdCompact } from "@/lib/money";
 import type {
   ReportCategorySeries,
@@ -463,6 +465,10 @@ function CategoryPlot({
   // Month indices the user excluded from the average (outliers).
   const [excluded, setExcluded] = useState<Set<number>>(() => new Set());
 
+  const { resolvedTheme } = useTheme();
+  const isDark = resolvedTheme === "dark";
+  const c = useMemo(() => getChartAxisTheme(isDark), [isDark]);
+
   const series = category.series;
   const includedValues = series.filter((_, i) => !excluded.has(i));
   const average =
@@ -472,10 +478,12 @@ function CategoryPlot({
 
   const chartData = months.map((m, i) => ({
     label: m.label.replace(/ \d{4}$/, ""),
+    fullLabel: m.label,
     key: m.key,
     spend: Math.round(series[i] ?? 0),
     avg: Math.round(average),
     idx: i,
+    off: excluded.has(i),
   }));
 
   const toggle = (i: number) =>
@@ -487,37 +495,73 @@ function CategoryPlot({
     });
 
   const color = category.color || SPENDING_COLOR;
+  // Hollow fill for an excluded dot: match the card background so the solid
+  // ring reads as "empty" in both themes.
+  const dotHollowFill = isDark ? "#18181b" : "#ffffff";
 
   return (
-    <div className="rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900/60">
+    <div className="rounded-xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900 dark:shadow-black/30">
       <div className="flex items-baseline justify-between gap-2">
-        <h3 className="truncate font-medium text-zinc-900 dark:text-zinc-100" title={category.name}>
+        <h3
+          className="truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100"
+          title={category.name}
+        >
           {category.name}
         </h3>
         <div className="shrink-0 text-right text-xs text-zinc-500 dark:text-zinc-400">
           avg{" "}
-          <span className="font-semibold text-zinc-800 dark:text-zinc-200">{formatUsd(average)}</span>
-          {excluded.size > 0 ? <span className="text-zinc-400"> · {excluded.size} excluded</span> : null}
+          <span className="font-semibold tabular-nums text-zinc-800 dark:text-zinc-200">
+            {formatUsd(average)}
+          </span>
+          {excluded.size > 0 ? (
+            <span className="text-zinc-400"> · {excluded.size} excluded</span>
+          ) : null}
         </div>
       </div>
 
-      <div className="mt-3 h-52 w-full">
+      <div className="mt-3 h-56 w-full min-w-0">
         <ResponsiveContainer width="100%" height="100%">
-          <ComposedChart data={chartData} margin={{ top: 8, right: 8, bottom: 0, left: 8 }}>
-            <CartesianGrid
-              strokeDasharray="3 3"
-              stroke="currentColor"
-              className="text-zinc-200 dark:text-zinc-800"
+          <ComposedChart data={chartData} margin={{ top: 8, right: 8, left: 0, bottom: 8 }}>
+            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={c.gridStroke} />
+            <XAxis dataKey="label" tick={{ fontSize: 11, fill: c.tickFill }} interval={0} />
+            <YAxis
+              tick={{ fontSize: 11, fill: c.tickFill }}
+              tickFormatter={(v) => formatUsdCompact(Number(v))}
+              width={48}
             />
-            <XAxis dataKey="label" tick={{ fontSize: 11 }} />
-            <YAxis tickFormatter={(v) => formatUsdCompact(Number(v))} tick={{ fontSize: 11 }} width={48} />
-            <Tooltip formatter={(v) => formatUsd(Number(v))} />
-            <Bar dataKey="spend" name="Spend" radius={[3, 3, 0, 0]} cursor="pointer">
+            <Tooltip
+              cursor={{ fill: c.gridStroke, fillOpacity: 0.3 }}
+              content={({ active, payload }) => {
+                if (!active || !payload?.length) return null;
+                const row = payload[0]?.payload as (typeof chartData)[number] | undefined;
+                if (!row) return null;
+                return (
+                  <div className={c.tooltipShell}>
+                    <div className={c.tooltipTitle}>{row.fullLabel}</div>
+                    <div className={c.tooltipOrange}>Average: {formatUsd(average)}</div>
+                    <div className={c.tooltipBody}>
+                      Spend: {formatUsd(row.spend)}
+                      {row.off ? " · excluded from avg" : ""}
+                    </div>
+                    <p className={c.tooltipFooter}>Click a bar for its transactions</p>
+                  </div>
+                );
+              }}
+            />
+            <Bar
+              dataKey="spend"
+              name="Spend"
+              radius={[4, 4, 0, 0]}
+              maxBarSize={36}
+              style={{ cursor: "pointer" }}
+            >
               {chartData.map((d) => (
                 <Cell
                   key={d.key}
                   fill={color}
-                  fillOpacity={excluded.has(d.idx) ? 0.3 : 0.9}
+                  fillOpacity={d.off ? 0 : 0.28}
+                  stroke={color}
+                  strokeWidth={1.5}
                   onClick={() => onBarClick(d.key)}
                 />
               ))}
@@ -550,8 +594,7 @@ function CategoryPlot({
                       cx={cx}
                       cy={cy}
                       r={5}
-                      className={off ? "fill-white dark:fill-zinc-900" : undefined}
-                      fill={off ? undefined : AVG_LINE_COLOR}
+                      fill={off ? dotHollowFill : AVG_LINE_COLOR}
                       stroke={AVG_LINE_COLOR}
                       strokeWidth={2}
                       style={{ cursor: "pointer" }}
@@ -565,9 +608,13 @@ function CategoryPlot({
         </ResponsiveContainer>
       </div>
 
-      <p className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-zinc-400 dark:text-zinc-500">
+      <p className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-zinc-500 dark:text-zinc-400">
         <span className="inline-flex items-center gap-1">
-          <span aria-hidden className="inline-block h-2 w-4 border-t-2 border-dashed" style={{ borderColor: AVG_LINE_COLOR }} />
+          <span
+            aria-hidden
+            className="inline-block h-0 w-4 border-t-2 border-dashed"
+            style={{ borderColor: AVG_LINE_COLOR }}
+          />
           average — click a point to include/exclude a month
         </span>
         <span>click a bar for its transactions</span>
@@ -869,10 +916,15 @@ export function ReportView({ householdName }: { householdName: string }) {
     });
   }, []);
 
+  const { resolvedTheme } = useTheme();
+  const isDark = resolvedTheme === "dark";
+  const c = useMemo(() => getChartAxisTheme(isDark), [isDark]);
+
   const chartData = useMemo(
     () =>
       (data?.months ?? []).map((m) => ({
         label: m.label.replace(/ \d{4}$/, ""),
+        fullLabel: m.label,
         income: Math.round(m.income),
         spending: Math.round(m.spending),
         net: Math.round(m.net),
@@ -990,14 +1042,51 @@ export function ReportView({ householdName }: { householdName: string }) {
       <Card title="Income vs spending">
         <div className="h-72 w-full">
           <ResponsiveContainer width="100%" height="100%">
-            <ComposedChart data={chartData} margin={{ top: 8, right: 8, bottom: 0, left: 8 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="currentColor" className="text-zinc-200 dark:text-zinc-800" />
-              <XAxis dataKey="label" tick={{ fontSize: 12 }} />
-              <YAxis tickFormatter={(v) => formatUsdCompact(Number(v))} tick={{ fontSize: 12 }} width={56} />
-              <Tooltip formatter={(v) => formatUsd(Number(v))} />
-              <Legend />
-              <Bar dataKey="income" name="Income" fill={INCOME_COLOR} radius={[3, 3, 0, 0]} />
-              <Bar dataKey="spending" name="Spending" fill={SPENDING_COLOR} radius={[3, 3, 0, 0]} />
+            <ComposedChart data={chartData} margin={{ top: 8, right: 8, bottom: 8, left: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={c.gridStroke} />
+              <XAxis dataKey="label" tick={{ fontSize: 11, fill: c.tickFill }} interval={0} />
+              <YAxis
+                tickFormatter={(v) => formatUsdCompact(Number(v))}
+                tick={{ fontSize: 11, fill: c.tickFill }}
+                width={48}
+              />
+              <Tooltip
+                cursor={{ fill: c.gridStroke, fillOpacity: 0.3 }}
+                content={({ active, payload }) => {
+                  if (!active || !payload?.length) return null;
+                  const row = payload[0]?.payload as (typeof chartData)[number] | undefined;
+                  if (!row) return null;
+                  const lines = [
+                    { name: "Income", value: row.income, color: INCOME_COLOR },
+                    { name: "Spending", value: row.spending, color: SPENDING_COLOR },
+                    { name: "Net", value: row.net, color: NET_COLOR },
+                  ];
+                  return (
+                    <div className={c.tooltipShell}>
+                      <div className={c.tooltipTitle}>{row.fullLabel}</div>
+                      {lines.map((l) => (
+                        <div
+                          key={l.name}
+                          className="mt-1 flex items-center justify-between gap-3 text-[11px] tabular-nums"
+                        >
+                          <span className="flex items-center gap-1.5">
+                            <span
+                              className="h-2 w-2 shrink-0 rounded-sm"
+                              style={{ backgroundColor: l.color }}
+                              aria-hidden
+                            />
+                            <span className="text-zinc-600 dark:text-zinc-300">{l.name}</span>
+                          </span>
+                          <span className="text-zinc-900 dark:text-zinc-100">{formatUsd(l.value)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                }}
+              />
+              <Legend wrapperStyle={{ fontSize: 12 }} />
+              <Bar dataKey="income" name="Income" fill={INCOME_COLOR} radius={[4, 4, 0, 0]} maxBarSize={36} />
+              <Bar dataKey="spending" name="Spending" fill={SPENDING_COLOR} radius={[4, 4, 0, 0]} maxBarSize={36} />
               <Line dataKey="net" name="Net" stroke={NET_COLOR} strokeWidth={2} dot={false} />
             </ComposedChart>
           </ResponsiveContainer>
