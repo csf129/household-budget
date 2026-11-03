@@ -113,6 +113,30 @@ export type SavingsAnalysis = {
   shortlist: string[];
 };
 
+/**
+ * One spending transaction behind a category/month bar on the report's
+ * "Individual" tab. Positive `amount` = money out, matching how the category
+ * bars are summed (so a month's transactions add up to its bar).
+ */
+export type ReportTransaction = {
+  /** Category display name; matches `ReportCategorySeries.name`. */
+  category: string;
+  /** Month bucket key; aligns with `ReportMonth.key`. */
+  monthKey: string;
+  /** Transaction date, YYYY-MM-DD. */
+  occurredOn: string;
+  description: string;
+  /** Spend in USD (positive = money out). */
+  amount: number;
+};
+
+/** Drill-down payload for the report's per-category plots. */
+export type ReportTransactionsPayload = {
+  /** Months in the window, oldest → newest, aligned with the report series. */
+  months: { key: string; label: string }[];
+  items: ReportTransaction[];
+};
+
 export type ReportData = {
   householdName: string;
   /** ISO timestamp the report was generated. */

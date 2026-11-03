@@ -4,7 +4,13 @@ import type {
   PrimaryCategoryGroupRow,
   TransactionRow,
 } from "@/types/finance";
-import type { ReportData, ReportMonth, ReportCreditCard } from "@/types/report";
+import type {
+  ReportData,
+  ReportMonth,
+  ReportCreditCard,
+  ReportTransaction,
+  ReportTransactionsPayload,
+} from "@/types/report";
 import type { PeriodBucket } from "@/lib/dashboard-analytics";
 import { fetchAllHouseholdTransactions } from "@/lib/fetch-household-transactions";
 import { mapTransactionRow } from "@/lib/map-transaction";
@@ -12,7 +18,9 @@ import { mapCategoryRowFromSupabase } from "@/lib/category-display";
 import { attachPrimaryGroupsFromCategoryCatalog } from "@/lib/attach-primary-group-to-transactions";
 import {
   aggregateCategorySpendingInRange,
+  categoryDisplayName,
   overviewIncomeContribution,
+  transactionCountsAsOverviewPurchasesBar,
 } from "@/lib/dashboard-analytics";
 import { fetchCreditCards } from "@/lib/fetch-credit-cards";
 import { fetchSavingsPlansWithProgress } from "@/lib/fetch-savings-plans";
@@ -195,5 +203,72 @@ export async function assembleReportData(
     categories,
     creditCards,
     savingsPlans,
+  };
+}
+
+/**
+ * The individual spending transactions behind each category/month bar, for the
+ * report's "Individual" tab drill-down. Uses the SAME window, categorization,
+ * and purchases-&-bills filter as `assembleReportData`, so each month's
+ * transactions sum to that category's bar. Kept separate from the main report
+ * so the overview payload and the `/budget-report` skill stay lean.
+ */
+export async function assembleReportTransactions(
+  supabase: SupabaseClient,
+  householdId: string,
+  options?: { months?: number },
+): Promise<ReportTransactionsPayload> {
+  const monthCount = Math.min(
+    Math.max(Math.trunc(options?.months ?? DEFAULT_MONTHS), MIN_MONTHS),
+    MAX_MONTHS,
+  );
+  const buckets = buildCompleteMonthBuckets(monthCount);
+
+  const [catResult, pgResult] = await Promise.all([
+    supabase.from("categories").select(CATEGORY_SELECT).eq("household_id", householdId),
+    supabase
+      .from("primary_category_groups")
+      .select("id,name,slug,color,sort_order")
+      .eq("household_id", householdId),
+  ]);
+
+  const categoryRows: CategoryRow[] = (catResult.data ?? []).map((c) =>
+    mapCategoryRowFromSupabase(c),
+  );
+  const primaryGroupRows: PrimaryCategoryGroupRow[] = (pgResult.data ?? []).map((g) => ({
+    id: String(g.id),
+    name: String(g.name ?? ""),
+    slug: String(g.slug ?? ""),
+    color: g.color != null ? String(g.color) : null,
+    sort_order: Number(g.sort_order ?? 0),
+  }));
+
+  const { data: rawTxs } = await fetchAllHouseholdTransactions(supabase, householdId);
+  const allTxs: TransactionRow[] = attachPrimaryGroupsFromCategoryCatalog(
+    (rawTxs ?? []).map(mapTransactionRow),
+    categoryRows,
+    primaryGroupRows,
+  );
+
+  const items: ReportTransaction[] = [];
+  for (const b of buckets) {
+    for (const t of allTxs) {
+      if (t.occurred_on < b.start || t.occurred_on > b.end) continue;
+      if (!transactionCountsAsOverviewPurchasesBar(t)) continue;
+      const description =
+        (t.normalized_description || t.raw_description || "").trim() || "(no description)";
+      items.push({
+        category: categoryDisplayName(t),
+        monthKey: b.key,
+        occurredOn: t.occurred_on,
+        description,
+        amount: -t.amount,
+      });
+    }
+  }
+
+  return {
+    months: buckets.map((b) => ({ key: b.key, label: b.label })),
+    items,
   };
 }
