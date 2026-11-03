@@ -15,7 +15,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { getChartAxisTheme } from "@/lib/chart-palette";
+import { getChartAxisTheme, hearthColorFor } from "@/lib/chart-palette";
 import { formatUsd, formatUsdCompact } from "@/lib/money";
 import type {
   ReportCategorySeries,
@@ -26,11 +26,6 @@ import type {
   SavingsAnalysis,
   SavingsEffort,
 } from "@/types/report";
-
-const INCOME_COLOR = "#16a34a";
-const SPENDING_COLOR = "#7c3aed";
-const NET_COLOR = "#0ea5e9";
-const AVG_LINE_COLOR = "#f59e0b";
 
 /** Props Recharts passes to a custom `dot` renderer (only the bits we use). */
 type DotRenderProps = { cx?: number; cy?: number; index?: number; [k: string]: unknown };
@@ -476,12 +471,20 @@ function CategoryPlot({
       ? includedValues.reduce((a, b) => a + b, 0) / includedValues.length
       : 0;
 
+  // The household's currently-set monthly budget for this category, drawn as a
+  // flat reference line when set.
+  const budget =
+    category.monthlyBudget != null && category.monthlyBudget > 0
+      ? Math.round(category.monthlyBudget)
+      : null;
+
   const chartData = months.map((m, i) => ({
     label: m.label.replace(/ \d{4}$/, ""),
     fullLabel: m.label,
     key: m.key,
     spend: Math.round(series[i] ?? 0),
     avg: Math.round(average),
+    budget,
     idx: i,
     off: excluded.has(i),
   }));
@@ -494,7 +497,7 @@ function CategoryPlot({
       return next;
     });
 
-  const color = category.color || SPENDING_COLOR;
+  const color = hearthColorFor(category.name);
   // Hollow fill for an excluded dot: match the card background so the solid
   // ring reads as "empty" in both themes.
   const dotHollowFill = isDark ? "#18181b" : "#ffffff";
@@ -543,6 +546,11 @@ function CategoryPlot({
                       Spend: {formatUsd(row.spend)}
                       {row.off ? " · excluded from avg" : ""}
                     </div>
+                    {row.budget != null ? (
+                      <div className="mt-1" style={{ color: c.budgetLine }}>
+                        Budget: {formatUsd(row.budget)}
+                      </div>
+                    ) : null}
                     <p className={c.tooltipFooter}>Click a bar for its transactions</p>
                   </div>
                 );
@@ -566,10 +574,21 @@ function CategoryPlot({
                 />
               ))}
             </Bar>
+            {budget != null ? (
+              <Line
+                dataKey="budget"
+                name="Budget"
+                stroke={c.budgetLine}
+                strokeWidth={2}
+                isAnimationActive={false}
+                dot={false}
+                activeDot={false}
+              />
+            ) : null}
             <Line
               dataKey="avg"
               name="Average"
-              stroke={AVG_LINE_COLOR}
+              stroke={c.avgLine}
               strokeWidth={2}
               strokeDasharray="5 4"
               isAnimationActive={false}
@@ -594,8 +613,8 @@ function CategoryPlot({
                       cx={cx}
                       cy={cy}
                       r={5}
-                      fill={off ? dotHollowFill : AVG_LINE_COLOR}
-                      stroke={AVG_LINE_COLOR}
+                      fill={off ? dotHollowFill : c.avgLine}
+                      stroke={c.avgLine}
                       strokeWidth={2}
                       style={{ cursor: "pointer" }}
                       onClick={() => toggle(i)}
@@ -613,10 +632,20 @@ function CategoryPlot({
           <span
             aria-hidden
             className="inline-block h-0 w-4 border-t-2 border-dashed"
-            style={{ borderColor: AVG_LINE_COLOR }}
+            style={{ borderColor: c.avgLine }}
           />
           average — click a point to include/exclude a month
         </span>
+        {budget != null ? (
+          <span className="inline-flex items-center gap-1">
+            <span
+              aria-hidden
+              className="inline-block h-0 w-4 border-t-2"
+              style={{ borderColor: c.budgetLine }}
+            />
+            budget {formatUsd(budget)}
+          </span>
+        ) : null}
         <span>click a bar for its transactions</span>
       </p>
     </div>
@@ -1057,9 +1086,9 @@ export function ReportView({ householdName }: { householdName: string }) {
                   const row = payload[0]?.payload as (typeof chartData)[number] | undefined;
                   if (!row) return null;
                   const lines = [
-                    { name: "Income", value: row.income, color: INCOME_COLOR },
-                    { name: "Spending", value: row.spending, color: SPENDING_COLOR },
-                    { name: "Net", value: row.net, color: NET_COLOR },
+                    { name: "Income", value: row.income, color: c.barIncome },
+                    { name: "Spending", value: row.spending, color: c.barSpend },
+                    { name: "Net", value: row.net, color: c.netLine },
                   ];
                   return (
                     <div className={c.tooltipShell}>
@@ -1085,9 +1114,9 @@ export function ReportView({ householdName }: { householdName: string }) {
                 }}
               />
               <Legend wrapperStyle={{ fontSize: 12 }} />
-              <Bar dataKey="income" name="Income" fill={INCOME_COLOR} radius={[4, 4, 0, 0]} maxBarSize={36} />
-              <Bar dataKey="spending" name="Spending" fill={SPENDING_COLOR} radius={[4, 4, 0, 0]} maxBarSize={36} />
-              <Line dataKey="net" name="Net" stroke={NET_COLOR} strokeWidth={2} dot={false} />
+              <Bar dataKey="income" name="Income" fill={c.barIncome} radius={[4, 4, 0, 0]} maxBarSize={36} />
+              <Bar dataKey="spending" name="Spending" fill={c.barSpend} radius={[4, 4, 0, 0]} maxBarSize={36} />
+              <Line dataKey="net" name="Net" stroke={c.netLine} strokeWidth={2} dot={false} />
             </ComposedChart>
           </ResponsiveContainer>
         </div>

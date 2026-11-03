@@ -1202,7 +1202,8 @@ export function DashboardOverviewCharts({
             <div className="flex items-center justify-between gap-4">
               <span className="flex items-center gap-2 text-zinc-600 dark:text-zinc-400">
                 <span
-                  className="h-2.5 w-2.5 shrink-0 rounded-full bg-emerald-600 dark:bg-emerald-500"
+                  className="h-2.5 w-2.5 shrink-0 rounded-full"
+                  style={{ backgroundColor: c.barIncome }}
                   aria-hidden
                 />
                 Income
@@ -1214,7 +1215,8 @@ export function DashboardOverviewCharts({
             <div className="flex items-center justify-between gap-4">
               <span className="flex items-center gap-2 text-zinc-600 dark:text-zinc-400">
                 <span
-                  className="h-2.5 w-2.5 shrink-0 rounded-full bg-blue-600 dark:bg-blue-500"
+                  className="h-2.5 w-2.5 shrink-0 rounded-full"
+                  style={{ backgroundColor: c.barSpend }}
                   aria-hidden
                 />
                 Purchases &amp; bills
