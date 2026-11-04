@@ -1,4 +1,5 @@
 import { parseAmountSignFilter } from "@/lib/amount-sign-filter";
+import { parseAmountExact } from "@/lib/apply-category-rules";
 import type { CategoryRuleView } from "@/types/finance";
 
 /**
@@ -73,5 +74,6 @@ export function mapCategoryRuleRow(raw: unknown): CategoryRuleView {
     pattern: String(r.pattern ?? ""),
     priority: Number(r.priority ?? 100),
     amount_sign: parseAmountSignFilter(r.amount_sign),
+    amount_exact: parseAmountExact(r.amount_exact),
   };
 }

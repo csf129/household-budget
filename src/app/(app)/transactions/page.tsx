@@ -83,7 +83,7 @@ export default async function TransactionsPage() {
 
   const { data: categoryRulesRaw, error: rulesError } = await supabase
     .from("category_rules")
-    .select("category_id, match_type, pattern, priority, amount_sign")
+    .select("category_id, match_type, pattern, priority, amount_sign, amount_exact")
     .eq("household_id", household.householdId);
 
   if (catError || txError || archivedErr || accError || feedError || rulesError) {

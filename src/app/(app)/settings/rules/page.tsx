@@ -44,6 +44,7 @@ export default async function SettingsRulesPage() {
       pattern,
       priority,
       amount_sign,
+      amount_exact,
       ${CATEGORY_RULE_CATEGORIES_EMBED}
     `,
     )

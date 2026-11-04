@@ -66,6 +66,8 @@ export type CategoryRuleView = {
   pattern: string;
   priority: number;
   amount_sign: AmountSignFilter;
+  /** When set, the transaction magnitude must equal this. null = any amount. */
+  amount_exact: number | null;
 };
 
 /** Overview income: null = rules + defaults; include/exclude = per-row override. */

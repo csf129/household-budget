@@ -291,7 +291,7 @@ export function TransactionEditModal({
             priority: 200,
             amount_sign: amountSignForRememberRule(transaction.amount),
           },
-          { onConflict: "household_id,match_type,pattern,amount_sign" },
+          { onConflict: "household_id,match_type,pattern,amount_sign,amount_exact" },
         );
 
         if (ruleErr) {

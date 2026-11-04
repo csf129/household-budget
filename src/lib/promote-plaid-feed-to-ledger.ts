@@ -49,7 +49,7 @@ export async function promotePlaidFeedRowToLedger(
 
   const { data: rulesRaw } = await supabase
     .from("category_rules")
-    .select("category_id, match_type, pattern, priority, amount_sign")
+    .select("category_id, match_type, pattern, priority, amount_sign, amount_exact")
     .eq("household_id", householdId);
   const rules = categoryRulesFromDb(rulesRaw ?? []);
   const trimmedCat = r.category_id?.trim();
