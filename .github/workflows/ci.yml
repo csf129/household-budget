@@ -13,7 +13,7 @@ concurrency:
 
 jobs:
   verify:
-    name: Type-check, build, lint
+    name: Type-check, test, build, lint
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -30,6 +30,9 @@ jobs:
 
       - name: Type-check
         run: npx tsc --noEmit
+
+      - name: Test
+        run: npm test
 
       - name: Build
         run: npm run build
