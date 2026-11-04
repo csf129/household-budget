@@ -68,12 +68,10 @@ export async function POST(request: Request) {
     ? body.lineItems
     : [];
 
-  let priorSummary: string | null = null;
-
   if (lines.length === 0) {
     const { data: ref, error: refErr } = await supabase
       .from("household_budget_reference")
-      .select("line_items, last_ai_summary")
+      .select("line_items")
       .eq("household_id", household.householdId)
       .maybeSingle();
 
@@ -85,8 +83,6 @@ export async function POST(request: Request) {
     if (Array.isArray(raw)) {
       lines = raw as ExtractedBudgetLineJson[];
     }
-    priorSummary =
-      ref?.last_ai_summary != null ? String(ref.last_ai_summary) : null;
 
     if (lines.length === 0) {
       return NextResponse.json(
@@ -97,14 +93,6 @@ export async function POST(request: Request) {
         { status: 400 },
       );
     }
-  } else {
-    const { data: ref } = await supabase
-      .from("household_budget_reference")
-      .select("last_ai_summary")
-      .eq("household_id", household.householdId)
-      .maybeSingle();
-    priorSummary =
-      ref?.last_ai_summary != null ? String(ref.last_ai_summary) : null;
   }
 
   const catCtx: CategoryContext[] = categoryList.map((c) => ({

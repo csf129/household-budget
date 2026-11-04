@@ -68,7 +68,6 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Transaction not found" }, { status: 404 });
   }
 
-  const ext = file.name.split(".").pop() ?? "";
   const uuid = crypto.randomUUID();
   const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
   const filePath = `${household.householdId}/${transactionId}/${uuid}-${safeName}`;

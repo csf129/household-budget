@@ -77,6 +77,7 @@ type PlanSavePayload = {
 function withoutIncludeInProjection(
   p: PlanSavePayload,
 ): Omit<PlanSavePayload, "include_in_projection"> {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- destructured only to omit include_in_projection from rest
   const { include_in_projection: _i, ...rest } = p;
   return rest;
 }
@@ -235,6 +236,7 @@ export function SavingsPlansManager({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- re-subscribe only when the modal opens/closes; dismissPlanModal just closes it
   }, [planModalOpen]);
 
   function recomputeProgressForPlan(plan: SavingsPlanRow): SavingsPlanWithProgress {
