@@ -7,6 +7,7 @@ import {
 } from "@/lib/budget-rollup-deterministic";
 import type { ExtractedBudgetLineJson } from "@/lib/parse-budget-spreadsheet";
 import { getHouseholdForUser } from "@/lib/household";
+import { enforceAiRateLimit } from "@/lib/ai-rate-limit";
 import { createClient } from "@/lib/supabase/server";
 import { getHouseholdAiModel } from "@/lib/get-household-ai-model";
 
@@ -37,6 +38,9 @@ export async function POST(request: Request) {
   if (!household) {
     return NextResponse.json({ error: "No household." }, { status: 403 });
   }
+
+  const limited = await enforceAiRateLimit(supabase, household.householdId);
+  if (limited) return limited;
 
   const modelId = await getHouseholdAiModel(supabase, household.householdId);
 

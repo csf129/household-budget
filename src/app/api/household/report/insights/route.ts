@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getHouseholdForUser } from "@/lib/household";
+import { enforceAiRateLimit } from "@/lib/ai-rate-limit";
 import { getHouseholdAiModel } from "@/lib/get-household-ai-model";
 import { assembleReportData } from "@/lib/report-data";
 import { generateSavingsInsights } from "@/lib/report-savings-insights";
@@ -27,6 +28,9 @@ export async function POST(req: Request) {
   if (!household) {
     return NextResponse.json({ error: "No household." }, { status: 403 });
   }
+
+  const limited = await enforceAiRateLimit(supabase, household.householdId);
+  if (limited) return limited;
 
   const monthsParam = Number(new URL(req.url).searchParams.get("months"));
   const months = Number.isFinite(monthsParam) && monthsParam > 0 ? monthsParam : 6;

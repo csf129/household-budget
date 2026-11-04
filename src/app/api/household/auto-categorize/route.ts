@@ -5,6 +5,7 @@ import {
   type TransactionContext,
 } from "@/lib/auto-categorize-openai";
 import { getHouseholdForUser } from "@/lib/household";
+import { enforceAiRateLimit } from "@/lib/ai-rate-limit";
 import {
   ledgerArchiveColumnExists,
   withActiveLedgerOnly,
@@ -48,6 +49,9 @@ export async function POST(request: Request) {
   if (!household) {
     return NextResponse.json({ error: "No household." }, { status: 403 });
   }
+
+  const limited = await enforceAiRateLimit(supabase, household.householdId);
+  if (limited) return limited;
 
   const [hasLedgerArchive, modelId] = await Promise.all([
     ledgerArchiveColumnExists(supabase),
