@@ -182,7 +182,7 @@ export async function promoteUnmirroredPlaidFeedRowsToLedger(
 
   const { data: rulesRaw } = await admin
     .from("category_rules")
-    .select("category_id, match_type, pattern, priority, amount_sign")
+    .select("category_id, match_type, pattern, priority, amount_sign, amount_exact")
     .eq("household_id", householdId);
   const categoryRules = categoryRulesFromDb(rulesRaw ?? []);
 

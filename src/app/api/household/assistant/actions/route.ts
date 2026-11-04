@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getHouseholdForUser } from "@/lib/household";
+import { enforceAiRateLimit } from "@/lib/ai-rate-limit";
 import { createClient } from "@/lib/supabase/server";
 import { callAi } from "@/lib/call-ai";
 import { getHouseholdAiModel } from "@/lib/get-household-ai-model";
@@ -34,6 +35,9 @@ export async function POST(request: Request) {
   if (!user) return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
   const household = await getHouseholdForUser(supabase, user.id);
   if (!household) return NextResponse.json({ error: "No household." }, { status: 403 });
+
+  const limited = await enforceAiRateLimit(supabase, household.householdId);
+  if (limited) return limited;
 
   const [{ data: categories, error }, modelId] = await Promise.all([
     supabase

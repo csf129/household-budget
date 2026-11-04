@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import {
+  parseAmountExact,
   resolveCategoryFromRules,
   type CategoryRuleRow,
 } from "@/lib/apply-category-rules";
@@ -381,7 +382,7 @@ export function TransactionsManager({
     if (!resolvedCategoryId) {
       const { data: rulesRaw } = await supabase
         .from("category_rules")
-        .select("category_id, match_type, pattern, priority, amount_sign")
+        .select("category_id, match_type, pattern, priority, amount_sign, amount_exact")
         .eq("household_id", householdId);
       const rules: CategoryRuleRow[] = (rulesRaw ?? []).map((row) => ({
         category_id: String(row.category_id),
@@ -389,6 +390,7 @@ export function TransactionsManager({
         pattern: String(row.pattern ?? ""),
         priority: Number(row.priority ?? 0),
         amount_sign: (row.amount_sign as CategoryRuleRow["amount_sign"]) ?? "any",
+        amount_exact: parseAmountExact(row.amount_exact),
       }));
       resolvedCategoryId = resolveCategoryFromRules(
         applied.normalized_description,

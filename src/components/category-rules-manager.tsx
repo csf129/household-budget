@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import {
+  categoryRuleAmountMatches,
   categoryRuleMatchesNormalized,
   resolveCategoryFromRules,
   type CategoryRuleRow as EngineRuleRow,
@@ -74,6 +75,7 @@ function rulesForEngine(list: CategoryRuleView[]): EngineRuleRow[] {
     pattern: r.pattern,
     priority: r.priority,
     amount_sign: r.amount_sign,
+    amount_exact: r.amount_exact,
   }));
 }
 
@@ -92,6 +94,7 @@ export function CategoryRulesManager({
   const [pattern, setPattern] = useState("");
   const [priority, setPriority] = useState("100");
   const [amountSign, setAmountSign] = useState<AmountSignFilter>("any");
+  const [amountExact, setAmountExact] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [applyBusy, setApplyBusy] = useState(false);
@@ -126,6 +129,7 @@ export function CategoryRulesManager({
     setPattern("");
     setPriority("100");
     setAmountSign("any");
+    setAmountExact("");
     setError(null);
   }
 
@@ -303,6 +307,7 @@ export function CategoryRulesManager({
               ? Number.parseFloat(tx.amount)
               : Number(tx.amount);
           if (!amountMatchesSignFilter(amt, rule.amount_sign)) continue;
+          if (!categoryRuleAmountMatches(amt, rule.amount_exact)) continue;
           if (
             !categoryRuleMatchesNormalized(
               String(tx.normalized_description ?? ""),
@@ -346,6 +351,7 @@ export function CategoryRulesManager({
     setPattern(rule.pattern);
     setPriority(String(rule.priority));
     setAmountSign(rule.amount_sign);
+    setAmountExact(rule.amount_exact == null ? "" : String(rule.amount_exact));
     setError(null);
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
@@ -369,6 +375,19 @@ export function CategoryRulesManager({
       return;
     }
 
+    let amountExactValue: number | null = null;
+    const trimmedAmount = amountExact.trim();
+    if (trimmedAmount !== "") {
+      const parsed = Number.parseFloat(trimmedAmount);
+      if (!Number.isFinite(parsed) || parsed < 0) {
+        setError(
+          "Exact amount must be 0 or more, or left blank to match any amount.",
+        );
+        return;
+      }
+      amountExactValue = parsed;
+    }
+
     setBusy(true);
     const supabase = createClient();
 
@@ -382,6 +401,7 @@ export function CategoryRulesManager({
             pattern: normPattern,
             priority: pr,
             amount_sign: amountSign,
+            amount_exact: amountExactValue,
           })
           .eq("id", editingId)
           .eq("household_id", householdId)
@@ -392,6 +412,8 @@ export function CategoryRulesManager({
             match_type,
             pattern,
             priority,
+            amount_sign,
+            amount_exact,
             ${CATEGORY_RULE_CATEGORIES_EMBED}
           `,
           )
@@ -418,6 +440,7 @@ export function CategoryRulesManager({
             pattern: normPattern,
             priority: pr,
             amount_sign: amountSign,
+            amount_exact: amountExactValue,
           })
           .select(
             `
@@ -427,6 +450,7 @@ export function CategoryRulesManager({
             pattern,
             priority,
             amount_sign,
+            amount_exact,
             ${CATEGORY_RULE_CATEGORIES_EMBED}
           `,
           )
@@ -673,6 +697,30 @@ export function CategoryRulesManager({
               </p>
             </div>
 
+            <div>
+              <label
+                htmlFor="rule-amount-exact"
+                className="text-xs font-medium text-zinc-500 dark:text-zinc-400"
+              >
+                Exact amount ($)
+              </label>
+              <input
+                id="rule-amount-exact"
+                type="number"
+                min={0}
+                step="0.01"
+                inputMode="decimal"
+                value={amountExact}
+                onChange={(e) => setAmountExact(e.target.value)}
+                placeholder="any"
+                className="mt-1 w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none focus:border-zinc-500 focus:ring-2 focus:ring-zinc-400/30 dark:border-zinc-600 dark:bg-zinc-950 dark:text-zinc-100 dark:focus:ring-zinc-500/25"
+              />
+              <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                Match only this dollar amount (ignores sign). Leave blank for any
+                amount — e.g. a $160 Venmo to the cleaners.
+              </p>
+            </div>
+
             <div className="sm:col-span-2">
               <label
                 htmlFor="rule-pattern"
@@ -747,6 +795,11 @@ export function CategoryRulesManager({
                     </td>
                     <td className="whitespace-nowrap px-6 py-3 text-zinc-600 dark:text-zinc-400">
                       {amountSignShortLabel(r.amount_sign)}
+                      {r.amount_exact != null ? (
+                        <span className="ml-1 tabular-nums text-zinc-900 dark:text-zinc-100">
+                          = ${r.amount_exact.toFixed(2)}
+                        </span>
+                      ) : null}
                     </td>
                     <td className="max-w-xs px-6 py-3 font-mono text-xs text-zinc-900 dark:text-zinc-100">
                       {r.pattern}

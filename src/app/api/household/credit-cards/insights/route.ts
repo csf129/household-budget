@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getHouseholdForUser } from "@/lib/household";
+import { enforceAiRateLimit } from "@/lib/ai-rate-limit";
 import { getHouseholdAiModel } from "@/lib/get-household-ai-model";
 import { fetchCreditCards } from "@/lib/fetch-credit-cards";
 import {
@@ -55,6 +56,9 @@ export async function POST() {
 
   const household = await getHouseholdForUser(supabase, user.id);
   if (!household) return NextResponse.json({ error: "No household." }, { status: 403 });
+
+  const limited = await enforceAiRateLimit(supabase, household.householdId);
+  if (limited) return limited;
 
   const { rows, error: cardErr } = await fetchCreditCards(supabase, household.householdId);
   if (cardErr) return NextResponse.json({ error: cardErr }, { status: 500 });

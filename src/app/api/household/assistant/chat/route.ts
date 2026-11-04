@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getHouseholdForUser } from "@/lib/household";
+import { checkAiRateLimit } from "@/lib/ai-rate-limit";
 import {
   ledgerArchiveColumnExists,
   withActiveLedgerOnly,
@@ -30,6 +31,14 @@ async function buildPromptContext(messages: Array<{ role: "user" | "assistant"; 
   if (!user) return { error: "Unauthorized.", status: 401 as const };
   const household = await getHouseholdForUser(supabase, user.id);
   if (!household) return { error: "No household.", status: 403 as const };
+
+  const { limited } = await checkAiRateLimit(supabase, household.householdId);
+  if (limited) {
+    return {
+      error: "Too many AI requests. Please wait a minute and try again.",
+      status: 429 as const,
+    };
+  }
 
   const today = new Date();
   const day90 = new Date(today);
