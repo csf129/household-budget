@@ -69,6 +69,36 @@ export async function pushHearthRollup(
     if (error) throw new Error(`finance_trend: ${error.message}`);
   }
 
+  // Per-month category split behind each trend bar — replace wholesale.
+  await hearth.from("finance_trend_categories").delete().eq("household_id", hearthHouseholdId);
+  if (rollup.trend_categories.length) {
+    const rows = rollup.trend_categories.map((c) => ({
+      household_id: hearthHouseholdId,
+      period_month: c.month,
+      category_name: c.category_name,
+      color: c.color,
+      spent: c.spent,
+    }));
+    const { error } = await hearth.from("finance_trend_categories").insert(rows);
+    if (error) throw new Error(`finance_trend_categories: ${error.message}`);
+  }
+
+  // Transactions behind the bars — replace wholesale, inserted in chunks.
+  await hearth.from("finance_transactions").delete().eq("household_id", hearthHouseholdId);
+  for (let i = 0; i < rollup.transactions.length; i += 500) {
+    const rows = rollup.transactions.slice(i, i + 500).map((t) => ({
+      household_id: hearthHouseholdId,
+      posted_on: t.posted_on,
+      merchant: t.merchant,
+      amount: t.amount,
+      category_name: t.category_name,
+      account_name: t.account_name,
+      pending: t.pending,
+    }));
+    const { error } = await hearth.from("finance_transactions").insert(rows);
+    if (error) throw new Error(`finance_transactions: ${error.message}`);
+  }
+
   // Accounts — replace this household's set, so an account unlinked in the
   // budget app disappears from Hearth rather than lingering.
   await hearth.from("finance_accounts").delete().eq("household_id", hearthHouseholdId);

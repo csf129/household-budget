@@ -10,7 +10,9 @@ import {
 import { attachPrimaryGroupsFromCategoryCatalog } from "@/lib/attach-primary-group-to-transactions";
 import {
   aggregateCategorySpendingInRange,
+  categoryDisplayName,
   totalsForBucket,
+  transactionCountsAsDashboardSpending,
 } from "@/lib/dashboard-analytics";
 import type { IncomeRuleRow } from "@/lib/apply-income-rules";
 import {
@@ -31,8 +33,10 @@ import type {
  * This is the ONLY thing that leaves the budget app for Hearth. It is derived
  * entirely from the app's own analytics (`aggregateCategorySpendingInRange`,
  * the season-aware budget helpers), so Hearth's figures equal the dashboard's
- * rather than a second, drifting implementation. It carries no account numbers,
- * no Plaid data, and not a single transaction — only budget-vs-spent totals.
+ * rather than a second, drifting implementation. It carries no account numbers
+ * and no Plaid data. It does carry the trailing twelve months of spending
+ * transactions (description, amount, category, account display name) so the
+ * Finances chart can drill from a bar into what made it up.
  */
 export type HearthRollup = {
   as_of: string;
@@ -41,6 +45,8 @@ export type HearthRollup = {
   month: PeriodTotals;
   categories: RollupCategory[];
   trend: TrendPoint[];
+  trend_categories: TrendCategoryPoint[];
+  transactions: RollupTransaction[];
   accounts: RollupAccount[];
 };
 
@@ -63,6 +69,28 @@ export type RollupCategory = {
 };
 
 type TrendPoint = { month: string; budget: number; spent: number; income: number };
+
+/** One category's share of one month's spending (sums to that month's `spent`). */
+export type TrendCategoryPoint = {
+  month: string;
+  category_name: string;
+  color: string | null;
+  spent: number;
+};
+
+/**
+ * A spending transaction behind a bar. Spending is positive. Only the trailing
+ * twelve months, and only what counts as spending, so a month's rows add up to
+ * its bar. Display name of the account only — never a mask, id or token.
+ */
+export type RollupTransaction = {
+  posted_on: string;
+  merchant: string;
+  amount: number;
+  category_name: string;
+  account_name: string | null;
+  pending: boolean;
+};
 
 /**
  * One linked bank/card account's display balance. No account number, no Plaid
@@ -331,6 +359,41 @@ export async function computeHearthRollup(
     });
   }
 
+  // --- per-month category split + the transactions behind it ----------------
+  // Same filter and same category naming as `spentInRange`, so each month's rows
+  // sum to its trend bar and the transaction list reconciles with the chart.
+  const trendCategories: TrendCategoryPoint[] = [];
+  for (const p of trend) {
+    const [py, pm] = p.month.split("-").map((x) => parseInt(x, 10));
+    const agg = aggregateCategorySpendingInRange(
+      txs,
+      isoDate(py, pm, 1),
+      isoDate(py, pm, lastDayOfMonth(py, pm)),
+      "all",
+    );
+    for (const [name, v] of agg) {
+      const spent = round2(v.amount);
+      if (!spent) continue;
+      trendCategories.push({ month: p.month, category_name: name, color: v.color ?? null, spent });
+    }
+  }
+
+  const windowStart = trend[0]?.month ?? monthStart;
+  const transactions: RollupTransaction[] = [];
+  for (const t of txs) {
+    if (t.occurred_on < windowStart || t.occurred_on > monthEnd) continue;
+    if (!transactionCountsAsDashboardSpending(t)) continue;
+    const desc = (t.normalized_description || t.raw_description || "").trim();
+    transactions.push({
+      posted_on: t.occurred_on.slice(0, 10),
+      merchant: desc,
+      amount: round2(-t.amount),
+      category_name: categoryDisplayName(t),
+      account_name: t.account_name ?? null,
+      pending: false,
+    });
+  }
+
   return {
     as_of: new Date().toISOString(),
     currency: "USD",
@@ -350,6 +413,8 @@ export async function computeHearthRollup(
     },
     categories,
     trend,
+    trend_categories: trendCategories,
+    transactions,
     accounts,
   };
 }
