@@ -52,12 +52,20 @@ export type ReportCategorySeries = SeriesStats & {
 /** One recorded change to a category's monthly budget, for the audit view. */
 export type BudgetChange = {
   id: string;
+  /** The category this change was to, or null if it has since been deleted. */
+  categoryId: string | null;
   /** Category display name as it was when the change was made. */
   categoryName: string;
   /** Previous monthly_budget value (null = none set). */
   oldAmount: number | null;
   /** New monthly_budget value (null = cleared). */
   newAmount: number | null;
+  /**
+   * Sum of every category's monthly budget immediately after this change was
+   * applied (a running total, reconstructed from the current total and the
+   * logged deltas).
+   */
+  totalAfter: number;
   source: "report" | "settings";
   createdAt: string;
   /** True when the signed-in user made this change. */

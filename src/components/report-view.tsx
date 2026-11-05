@@ -875,17 +875,56 @@ function TransactionsModal({
 }
 
 /** Modal listing the household's recent monthly-budget changes (audit trail). */
-function BudgetHistoryModal({ onClose }: { onClose: () => void }) {
+type RevertItem = { categoryId: string; monthlyBudget: number | null };
+
+function fmtBudgetDate(iso: string): string {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime())
+    ? iso.slice(0, 10)
+    : d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+}
+
+/** Per category in a day group, the revert target = the OLD amount of that
+ * category's EARLIEST change that day (restores the pre-day state). Skips
+ * categories that have since been deleted. `items` are newest-first. */
+function groupRevertTargets(items: BudgetChange[]): RevertItem[] {
+  const map = new Map<string, number | null>();
+  for (const ch of items) {
+    if (ch.categoryId == null) continue;
+    map.set(ch.categoryId, ch.oldAmount); // older rows overwrite → earliest wins
+  }
+  return [...map.entries()].map(([categoryId, monthlyBudget]) => ({ categoryId, monthlyBudget }));
+}
+
+function BudgetHistoryModal({
+  onClose,
+  canEdit,
+  onChanged,
+}: {
+  onClose: () => void;
+  canEdit: boolean;
+  onChanged: () => void;
+}) {
   const [changes, setChanges] = useState<BudgetChange[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [actionErr, setActionErr] = useState<string | null>(null);
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  // Refetch the history (used after a revert). Sets state only in async
+  // callbacks, never synchronously, so it's safe to call from the effect too.
+  const load = useCallback(
+    () =>
+      fetch("/api/household/report/budget")
+        .then(async (res) => {
+          const json = await res.json();
+          if (!res.ok) throw new Error(json?.error ?? `Request failed (${res.status})`);
+          setChanges((json as { changes: BudgetChange[] }).changes);
+        })
+        .catch((err: unknown) => {
+          setError(err instanceof Error ? err.message : String(err));
+        }),
+    [],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -906,13 +945,51 @@ function BudgetHistoryModal({ onClose }: { onClose: () => void }) {
     };
   }, []);
 
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !busy) onClose();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose, busy]);
+
+  const revert = useCallback(
+    async (reverts: RevertItem[]) => {
+      if (reverts.length === 0) return;
+      setBusy(true);
+      setActionErr(null);
+      try {
+        const res = await fetch("/api/household/report/budget", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ reverts }),
+        });
+        const json = await res.json();
+        if (!res.ok) throw new Error(json?.error ?? `Request failed (${res.status})`);
+        await load();
+        onChanged();
+      } catch (err) {
+        setActionErr(err instanceof Error ? err.message : String(err));
+      } finally {
+        setBusy(false);
+      }
+    },
+    [load, onChanged],
+  );
+
+  // Group the (newest-first) changes into calendar days.
+  const groups = useMemo(() => {
+    const out: { day: string; label: string; items: BudgetChange[] }[] = [];
+    for (const ch of changes ?? []) {
+      const day = ch.createdAt.slice(0, 10);
+      const last = out[out.length - 1];
+      if (last && last.day === day) last.items.push(ch);
+      else out.push({ day, label: fmtBudgetDate(ch.createdAt), items: [ch] });
+    }
+    return out;
+  }, [changes]);
+
   const fmt = (n: number | null) => (n == null ? "—" : formatUsd(n));
-  const fmtDate = (iso: string) => {
-    const d = new Date(iso);
-    return Number.isNaN(d.getTime())
-      ? iso.slice(0, 10)
-      : d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
-  };
 
   return createPortal(
     <div
@@ -920,17 +997,18 @@ function BudgetHistoryModal({ onClose }: { onClose: () => void }) {
       role="dialog"
       aria-modal="true"
       aria-label="Budget change history"
-      onClick={onClose}
+      onClick={() => !busy && onClose()}
     >
       <div
-        className="max-h-[85vh] w-full max-w-lg overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-xl dark:border-zinc-700 dark:bg-zinc-900"
+        className="flex max-h-[85vh] w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-xl dark:border-zinc-700 dark:bg-zinc-900"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-start justify-between gap-3 border-b border-zinc-200 p-4 dark:border-zinc-800">
           <div>
             <h2 className="font-semibold text-zinc-900 dark:text-zinc-100">Budget changes</h2>
             <p className="text-sm text-zinc-500 dark:text-zinc-400">
-              Who changed a monthly budget, from what to what, and when.
+              Who changed a monthly budget, from what to what, the running budget total, and when.
+              {canEdit ? " Revert a change or a whole day." : ""}
             </p>
           </div>
           <button
@@ -942,7 +1020,14 @@ function BudgetHistoryModal({ onClose }: { onClose: () => void }) {
             ✕
           </button>
         </div>
-        <div className="max-h-[65vh] overflow-y-auto">
+
+        {actionErr ? (
+          <p className="border-b border-red-200 bg-red-50/80 px-4 py-2 text-sm text-red-700 dark:border-red-900/40 dark:bg-red-950/40 dark:text-red-300" role="alert">
+            {actionErr}
+          </p>
+        ) : null}
+
+        <div className="min-h-0 flex-1 overflow-y-auto">
           {error ? (
             <p className="p-4 text-sm text-red-600 dark:text-red-400" role="alert">
               Could not load history: {error}
@@ -954,28 +1039,76 @@ function BudgetHistoryModal({ onClose }: { onClose: () => void }) {
               No budget changes recorded yet.
             </p>
           ) : (
-            <ul className="divide-y divide-zinc-100 dark:divide-zinc-800">
-              {changes.map((ch) => (
-                <li key={ch.id} className="flex items-start justify-between gap-3 px-4 py-2.5">
-                  <div className="min-w-0">
-                    <p className="truncate text-sm text-zinc-800 dark:text-zinc-200">
-                      {ch.categoryName}
-                    </p>
-                    <p className="text-xs text-zinc-400">
-                      {fmtDate(ch.createdAt)}
-                      {ch.changedByMe ? " · you" : ""}
-                      {ch.source === "settings" ? " · Settings" : ""}
-                    </p>
-                  </div>
-                  <span className="shrink-0 text-sm tabular-nums text-zinc-700 dark:text-zinc-300">
-                    {fmt(ch.oldAmount)} <span className="text-zinc-400">→</span>{" "}
-                    <span className="font-medium text-zinc-900 dark:text-zinc-100">
-                      {fmt(ch.newAmount)}
+            groups.map((g) => {
+              const targets = groupRevertTargets(g.items);
+              return (
+                <div key={g.day}>
+                  <div className="sticky top-0 z-10 flex items-center justify-between gap-3 border-b border-zinc-200 bg-zinc-50/95 px-4 py-1.5 backdrop-blur dark:border-zinc-800 dark:bg-zinc-900/95">
+                    <span className="text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+                      {g.label}
+                      <span className="ml-1.5 font-normal normal-case text-zinc-400">
+                        · {g.items.length} change{g.items.length === 1 ? "" : "s"}
+                      </span>
                     </span>
-                  </span>
-                </li>
-              ))}
-            </ul>
+                    {canEdit && targets.length > 0 ? (
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => revert(targets)}
+                        className="shrink-0 rounded-md border border-zinc-300 bg-white px-2 py-0.5 text-xs font-medium text-zinc-700 hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
+                      >
+                        Revert all
+                      </button>
+                    ) : null}
+                  </div>
+                  <ul className="divide-y divide-zinc-100 dark:divide-zinc-800">
+                    {g.items.map((ch) => (
+                      <li
+                        key={ch.id}
+                        className="flex items-center justify-between gap-3 px-4 py-2.5"
+                      >
+                        <div className="min-w-0">
+                          <p className="truncate text-sm text-zinc-800 dark:text-zinc-200">
+                            {ch.categoryName}
+                          </p>
+                          <p className="text-xs text-zinc-400">
+                            {ch.changedByMe ? "you" : "household"}
+                            {ch.source === "settings" ? " · Settings" : ""}
+                          </p>
+                        </div>
+                        <div className="flex shrink-0 items-center gap-3">
+                          <div className="text-right text-sm tabular-nums">
+                            <div className="text-zinc-700 dark:text-zinc-300">
+                              {fmt(ch.oldAmount)} <span className="text-zinc-400">→</span>{" "}
+                              <span className="font-medium text-zinc-900 dark:text-zinc-100">
+                                {fmt(ch.newAmount)}
+                              </span>
+                            </div>
+                            <div className="text-xs text-zinc-400">
+                              total after {formatUsd(ch.totalAfter)}
+                            </div>
+                          </div>
+                          {canEdit && ch.categoryId ? (
+                            <button
+                              type="button"
+                              disabled={busy}
+                              onClick={() =>
+                                revert([
+                                  { categoryId: ch.categoryId as string, monthlyBudget: ch.oldAmount },
+                                ])
+                              }
+                              className="shrink-0 rounded-md px-2 py-0.5 text-xs font-medium text-violet-600 hover:bg-violet-50 disabled:opacity-50 dark:text-violet-300 dark:hover:bg-violet-950/40"
+                            >
+                              Revert
+                            </button>
+                          ) : null}
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              );
+            })
           )}
         </div>
       </div>
@@ -993,10 +1126,12 @@ function IndividualTab({
   data,
   months,
   canEditBudget,
+  onBudgetChanged,
 }: {
   data: ReportData;
   months: number;
   canEditBudget: boolean;
+  onBudgetChanged: () => void;
 }) {
   const [payload, setPayload] = useState<ReportTransactionsPayload | null>(null);
   const [loading, setLoading] = useState(true);
@@ -1138,7 +1273,7 @@ function IndividualTab({
         <div className="grid gap-4 lg:grid-cols-2">
           {categories.map((c) => (
             <CategoryPlot
-              key={`${c.name}-${months}`}
+              key={`${c.name}-${months}-${c.monthlyBudget ?? "x"}`}
               category={c}
               months={data.months}
               onBarClick={(monthKey) => setPopup({ category: c.name, monthKey })}
@@ -1157,7 +1292,13 @@ function IndividualTab({
         />
       ) : null}
 
-      {showHistory ? <BudgetHistoryModal onClose={() => setShowHistory(false)} /> : null}
+      {showHistory ? (
+        <BudgetHistoryModal
+          onClose={() => setShowHistory(false)}
+          canEdit={canEditBudget}
+          onChanged={onBudgetChanged}
+        />
+      ) : null}
     </div>
   );
 }
@@ -1179,6 +1320,10 @@ export function ReportView({
   const [insightsError, setInsightsError] = useState<string | null>(null);
 
   const [tab, setTab] = useState<"overview" | "individual">("overview");
+  // Bumped to re-fetch the report in place (e.g. after a budget revert), so the
+  // plots pick up the new budgets without a full reload.
+  const [reloadToken, setReloadToken] = useState(0);
+  const reloadReport = useCallback(() => setReloadToken((t) => t + 1), []);
 
   // Household notes keyed by category ("" = general). Seeded from the report
   // payload and kept in sync as the user edits them.
@@ -1219,7 +1364,7 @@ export function ReportView({
     return () => {
       cancelled = true;
     };
-  }, [months]);
+  }, [months, reloadToken]);
 
   const runInsights = useCallback(() => {
     setInsightsLoading(true);
@@ -1352,6 +1497,7 @@ export function ReportView({
           data={data}
           months={months}
           canEditBudget={canEditBudget}
+          onBudgetChanged={reloadReport}
         />
       ) : (
       <div className="space-y-6">
