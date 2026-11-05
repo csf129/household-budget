@@ -11,19 +11,13 @@ import {
 } from "@/lib/category-display";
 import { isBuiltinPrimarySlug } from "@/lib/primary-category-slugs";
 import type { CategoryRow, PrimaryCategoryGroupRow } from "@/types/finance";
+import {
+  PRESET_COLORS,
+  sortCategories,
+  sortPrimaryGroups,
+} from "./categories-manager.helpers";
 
 export type { CategoryRow, PrimaryCategoryGroupRow } from "@/types/finance";
-
-const PRESET_COLORS = [
-  "#0ea5e9",
-  "#8b5cf6",
-  "#10b981",
-  "#f59e0b",
-  "#ef4444",
-  "#ec4899",
-  "#6366f1",
-  "#64748b",
-];
 
 type Props = {
   householdId: string;
@@ -31,22 +25,6 @@ type Props = {
   initialPrimaryGroups: PrimaryCategoryGroupRow[];
   embedded?: boolean;
 };
-
-function sortCategories(list: CategoryRow[]): CategoryRow[] {
-  return [...list].sort((a, b) => {
-    if (a.sort_order !== b.sort_order) return a.sort_order - b.sort_order;
-    return a.name.localeCompare(b.name);
-  });
-}
-
-function sortPrimaryGroups(
-  list: PrimaryCategoryGroupRow[],
-): PrimaryCategoryGroupRow[] {
-  return [...list].sort((a, b) => {
-    if (a.sort_order !== b.sort_order) return a.sort_order - b.sort_order;
-    return a.name.localeCompare(b.name);
-  });
-}
 
 export function CategoriesManager({
   householdId,
