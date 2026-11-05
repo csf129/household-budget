@@ -32,7 +32,6 @@ import {
   dedupeTransactionsById,
   filterIncomeDuplicateGroups,
   findDuplicateTransactionGroups,
-  type DuplicateTransactionGroup,
 } from "@/lib/find-duplicate-transaction-groups";
 import { TransactionEditModal } from "@/components/transaction-edit-modal";
 import { mapTransactionRow } from "@/lib/map-transaction";
@@ -44,10 +43,14 @@ import {
 } from "@/lib/category-display";
 import { categoryDisplayName } from "@/lib/dashboard-analytics";
 import type { AccountRow, CategoryRow, SavingsPlanRow, TransactionRow } from "@/types/finance";
+import {
+  CREDIT_CARD_PAYMENT_CATEGORY,
+  parseAmount,
+  suggestedDupDeleteIds,
+  transactionMatchesKeywordSearch,
+} from "./transactions-manager.helpers";
 
 export type { TransactionRow } from "@/types/finance";
-
-const CREDIT_CARD_PAYMENT_CATEGORY = "credit card payment";
 
 type Props = {
   householdId: string;
@@ -64,35 +67,6 @@ type Props = {
   ledgerArchiveColumnAvailable: boolean;
   plans?: SavingsPlanRow[];
 };
-
-function parseAmount(value: unknown): number {
-  if (typeof value === "number") return value;
-  if (typeof value === "string") return Number.parseFloat(value);
-  return Number.NaN;
-}
-
-/** Every whitespace-separated token must appear (case-insensitive) in the combined text. */
-function transactionMatchesKeywordSearch(
-  t: TransactionRow,
-  rawQuery: string,
-): boolean {
-  const q = rawQuery.trim().toLowerCase();
-  if (!q) return true;
-  const tokens = q.split(/\s+/).filter(Boolean);
-  const primaryName = t.categories?.primary_group?.name ?? "";
-  const hay = [
-    t.raw_description,
-    t.normalized_description,
-    t.notes ?? "",
-    t.categories?.name ?? "",
-    primaryName,
-    t.occurred_on,
-    String(t.amount),
-  ]
-    .join(" ")
-    .toLowerCase();
-  return tokens.every((tok) => hay.includes(tok));
-}
 
 export function TransactionsManager({
   householdId,
@@ -697,16 +671,6 @@ export function TransactionsManager({
   function removeKeywordFilter(v: string) {
     setSavedKeywordFilters((prev) => prev.filter((x) => x !== v));
     setActiveKeywordFilters((prev) => prev.filter((x) => x !== v));
-  }
-
-  function suggestedDupDeleteIds(groups: DuplicateTransactionGroup[]): Set<string> {
-    const s = new Set<string>();
-    for (const g of groups) {
-      for (let i = 1; i < g.members.length; i++) {
-        s.add(g.members[i].id);
-      }
-    }
-    return s;
   }
 
   useEffect(() => {
