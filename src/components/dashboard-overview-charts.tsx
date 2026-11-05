@@ -436,7 +436,7 @@ export function DashboardOverviewCharts({
   useEffect(() => {
     if (bankTransferAccountId == null) return;
     if (!bankTransferAccountOptions.some((o) => o.id === bankTransferAccountId)) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: clear a selection that no longer exists in the options
+       
       setBankTransferAccountId(null);
     }
   }, [bankTransferAccountOptions, bankTransferAccountId]);
@@ -513,9 +513,6 @@ export function DashboardOverviewCharts({
       : bankTransferAccountOptions.find((o) => o.id === bankTransferAccountId)
           ?.name ?? null;
 
-  const rangeStart = chartRows[0]?.start ?? "";
-  const rangeEnd = chartRows[chartRows.length - 1]?.end ?? "";
-
   const chartRowKeySig = useMemo(
     () => chartRows.map((r) => r.key).join("|"),
     [chartRows],
@@ -523,11 +520,10 @@ export function DashboardOverviewCharts({
 
   useEffect(() => {
     if (chartRows.length === 0) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: reset selection when there are no rows
+       
       setCategoryBucketKey(null);
       return;
     }
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: keep the selected bucket valid as chart rows change
     setCategoryBucketKey((prev) => {
       if (prev && chartRows.some((r) => r.key === prev)) return prev;
       const lastWithSpend = [...chartRows]
@@ -537,6 +533,7 @@ export function DashboardOverviewCharts({
         lastWithSpend?.key ?? chartRows[chartRows.length - 1]!.key
       );
     });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on chartRowKeySig (stable signature), not the chartRows array identity
   }, [granularity, chartRowKeySig]);
 
   const categoryViewBucket = useMemo(() => {
@@ -608,10 +605,6 @@ export function DashboardOverviewCharts({
     () => categoryRows.reduce((s, r) => s + r.amount, 0),
     [categoryRows],
   );
-
-  const totalIncome = chartRows.reduce((s, r) => s + r.income, 0);
-  const totalSpending = chartRows.reduce((s, r) => s + r.spending, 0);
-  const difference = totalIncome - totalSpending;
 
   // Header shows the selected period (current month by default) rather than the full chart range.
   const displayIncome = categoryViewBucket?.income ?? 0;
@@ -724,8 +717,6 @@ export function DashboardOverviewCharts({
   }
 
   const heading = periodHeading(granularity);
-  const headingWithRange =
-    overviewRangeMode === "all" ? `All history (${heading})` : heading;
   const categoryPeriodTitle = categoryViewBucket?.label ?? heading;
   const drilldownAggregateLabel = categoryViewBucket
     ? `${categoryViewBucket.label} (${heading})`

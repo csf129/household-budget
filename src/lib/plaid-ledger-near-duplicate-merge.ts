@@ -283,8 +283,6 @@ export async function repairNearDuplicatePlaidLedgerPairsForHousehold(
     const span = calendarDaysApart(String(a.occurred_on), String(b.occurred_on));
     if (span == null || span > 4) continue;
 
-    const keep =
-      String(a.occurred_on) >= String(b.occurred_on) ? a : b;
     const drop = String(a.occurred_on) >= String(b.occurred_on) ? b : a;
     ledgerIdsToDelete.add(String(drop.id));
     if (drop.plaid_transaction_id) {

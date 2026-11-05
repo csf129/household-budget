@@ -99,26 +99,22 @@ export function parseBoaStatementCsv(csvText: string): ParseBoaStmtResult {
   );
 
   const rows: BankCsvImportRow[] = [];
-  let skipped = 0;
 
-  data.forEach((row, index) => {
+  data.forEach((row) => {
     const dateRaw = rowField(row, "Date");
     const iso = parseChaseTransactionDate(dateRaw);
     if (!iso) {
-      skipped += 1;
       return;
     }
 
     const descRaw = rowField(row, "Description").trim();
     if (shouldSkipDescription(descRaw)) {
-      skipped += 1;
       return;
     }
 
     const amountRaw = rowField(row, "Amount");
     const amount = parseMoney(amountRaw);
     if (amount === null) {
-      skipped += 1;
       return;
     }
 

@@ -19,10 +19,6 @@ export type ProjectionLine = {
 
 type Event = { date: Date; planId: string; amount: number };
 
-function maxDate(a: Date, b: Date): Date {
-  return a >= b ? a : b;
-}
-
 function firstOfMonth(d: Date): Date {
   return startOfDayLocal(new Date(d.getFullYear(), d.getMonth(), 1));
 }

@@ -26,7 +26,7 @@ async function getSignedUrl(receiptId: string, download = false): Promise<string
   return data.url ?? null;
 }
 
-export function ReceiptPopover({ receipts, onReceiptDeleted }: Props) {
+export function ReceiptPopover({ receipts }: Props) {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState<string | null>(null); // receiptId being actioned
   const ref = useRef<HTMLDivElement>(null);
