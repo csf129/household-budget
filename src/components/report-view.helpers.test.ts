@@ -6,8 +6,18 @@ import {
   notesFromFeedback,
   fmtBudgetDate,
   groupRevertTargets,
+  categoryWindowAverage,
+  sumCategoryBudgets,
+  overBudgetCategories,
 } from "./report-view.helpers";
-import type { BudgetChange, ReportFeedback } from "@/types/report";
+import type { BudgetChange, ReportCategorySeries, ReportFeedback } from "@/types/report";
+
+const cat = (
+  name: string,
+  series: number[],
+  monthlyBudget: number | null,
+): ReportCategorySeries =>
+  ({ name, series, monthlyBudget } as unknown as ReportCategorySeries);
 
 describe("matchesAny", () => {
   it("matches a hint case-insensitively as a substring", () => {
@@ -60,5 +70,39 @@ describe("groupRevertTargets", () => {
   it("skips changes with a null categoryId", () => {
     const items = [{ categoryId: null, oldAmount: 10 }] as unknown as BudgetChange[];
     expect(groupRevertTargets(items)).toEqual([]);
+  });
+});
+
+describe("categoryWindowAverage", () => {
+  it("averages the series", () => {
+    expect(categoryWindowAverage([100, 200, 300])).toBe(200);
+  });
+  it("returns 0 for an empty series", () => {
+    expect(categoryWindowAverage([])).toBe(0);
+  });
+});
+
+describe("sumCategoryBudgets", () => {
+  it("sums budgets treating null as zero", () => {
+    const cats = [cat("A", [1], 100), cat("B", [1], null), cat("C", [1], 50)];
+    expect(sumCategoryBudgets(cats)).toBe(150);
+  });
+});
+
+describe("overBudgetCategories", () => {
+  it("lists only over-budget categories, worst first, with overage and pct", () => {
+    const cats = [
+      cat("Under", [40, 60], 100), // avg 50 < 100
+      cat("Over small", [110, 130], 100), // avg 120, over 20
+      cat("Over big", [300, 500], 200), // avg 400, over 200
+      cat("No budget", [999], null),
+    ];
+    const out = overBudgetCategories(cats);
+    expect(out.map((r) => r.name)).toEqual(["Over big", "Over small"]);
+    expect(out[0]).toMatchObject({ avg: 400, budget: 200, over: 200, pct: 1 });
+    expect(out[1]).toMatchObject({ over: 20, pct: 0.2 });
+  });
+  it("ignores zero/negative budgets", () => {
+    expect(overBudgetCategories([cat("Z", [100], 0)])).toEqual([]);
   });
 });
