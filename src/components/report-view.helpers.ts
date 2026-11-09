@@ -1,4 +1,4 @@
-import type { BudgetChange, ReportFeedback } from "@/types/report";
+import type { BudgetChange, ReportCategorySeries, ReportFeedback } from "@/types/report";
 
 /**
  * Pure helpers, constants, and small types extracted from report-view.tsx.
@@ -68,4 +68,47 @@ export function groupRevertTargets(items: BudgetChange[]): RevertItem[] {
     map.set(ch.categoryId, ch.oldAmount); // older rows overwrite → earliest wins
   }
   return [...map.entries()].map(([categoryId, monthlyBudget]) => ({ categoryId, monthlyBudget }));
+}
+
+/** Mean of a per-month series (the same "avg" the plots show). */
+export function categoryWindowAverage(series: number[]): number {
+  if (series.length === 0) return 0;
+  return series.reduce((a, b) => a + b, 0) / series.length;
+}
+
+/** Sum of every category's monthly budget (null counts as 0). */
+export function sumCategoryBudgets(categories: ReportCategorySeries[]): number {
+  return categories.reduce((s, c) => s + (c.monthlyBudget ?? 0), 0);
+}
+
+export type BudgetStatusRow = {
+  name: string;
+  /** Window-average monthly spend. */
+  avg: number;
+  /** Monthly budget. */
+  budget: number;
+  /** avg − budget (> 0). */
+  over: number;
+  /** over / budget. */
+  pct: number;
+};
+
+/**
+ * Categories whose window-average monthly spend exceeds their monthly budget,
+ * worst (largest overage) first. Uses the same window average the plots show,
+ * so the list agrees with each plot's "avg" versus its budget line.
+ */
+export function overBudgetCategories(categories: ReportCategorySeries[]): BudgetStatusRow[] {
+  const rows: BudgetStatusRow[] = [];
+  for (const c of categories) {
+    const budget = c.monthlyBudget;
+    if (budget == null || budget <= 0) continue;
+    const avg = categoryWindowAverage(c.series);
+    const over = avg - budget;
+    if (over > 0.005) {
+      rows.push({ name: c.name, avg, budget, over, pct: over / budget });
+    }
+  }
+  rows.sort((a, b) => b.over - a.over);
+  return rows;
 }

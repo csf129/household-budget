@@ -34,6 +34,8 @@ import {
   groupRevertTargets,
   matchesAny,
   notesFromFeedback,
+  overBudgetCategories,
+  sumCategoryBudgets,
   type DotRenderProps,
   type RevertItem,
 } from "./report-view.helpers";
@@ -575,16 +577,23 @@ function CategoryPlot({
   // Drawn as a flat reference line when a positive budget is set.
   const budget = budgetValue != null && budgetValue > 0 ? budgetValue : null;
 
-  const chartData = months.map((m, i) => ({
-    label: m.label.replace(/ \d{4}$/, ""),
-    fullLabel: m.label,
-    key: m.key,
-    spend: Math.round(series[i] ?? 0),
-    avg: Math.round(average),
-    budget,
-    idx: i,
-    off: excluded.has(i),
-  }));
+  const chartData = months.map((m, i) => {
+    const spend = Math.round(series[i] ?? 0);
+    return {
+      label: m.label.replace(/ \d{4}$/, ""),
+      fullLabel: m.label,
+      key: m.key,
+      spend,
+      avg: Math.round(average),
+      budget,
+      over: budget != null && spend > budget,
+      idx: i,
+      off: excluded.has(i),
+    };
+  });
+
+  // How the window-average compares to the budget (shown in the header).
+  const avgOverBudget = budget != null ? average - budget : null;
 
   const toggle = (i: number) =>
     setExcluded((prev) => {
@@ -615,6 +624,16 @@ function CategoryPlot({
           </span>
           {excluded.size > 0 ? (
             <span className="text-zinc-400"> · {excluded.size} excluded</span>
+          ) : null}
+          {avgOverBudget != null ? (
+            <div
+              className="mt-0.5 text-[11px]"
+              style={{ color: avgOverBudget > 0 ? c.overBudget : undefined }}
+            >
+              {avgOverBudget > 0
+                ? `${formatUsd(avgOverBudget)} over budget`
+                : `${formatUsd(-avgOverBudget)} under budget`}
+            </div>
           ) : null}
         </div>
       </div>
@@ -655,9 +674,19 @@ function CategoryPlot({
                       {row.off ? " · excluded from avg" : ""}
                     </div>
                     {row.budget != null ? (
-                      <div className="mt-1" style={{ color: c.budgetLine }}>
-                        Budget: {formatUsd(row.budget)}
-                      </div>
+                      <>
+                        <div className="mt-1" style={{ color: c.budgetLine }}>
+                          Budget: {formatUsd(row.budget)}
+                        </div>
+                        <div
+                          className="mt-0.5 text-xs"
+                          style={{ color: row.spend > row.budget ? c.overBudget : undefined }}
+                        >
+                          {row.spend > row.budget
+                            ? `${formatUsd(row.spend - row.budget)} over budget`
+                            : `${formatUsd(row.budget - row.spend)} under budget`}
+                        </div>
+                      </>
                     ) : null}
                     <p className={c.tooltipFooter}>Click a bar for its transactions</p>
                   </div>
@@ -671,16 +700,19 @@ function CategoryPlot({
               maxBarSize={36}
               style={{ cursor: "pointer" }}
             >
-              {chartData.map((d) => (
-                <Cell
-                  key={d.key}
-                  fill={color}
-                  fillOpacity={d.off ? 0 : 0.28}
-                  stroke={color}
-                  strokeWidth={1.5}
-                  onClick={() => onBarClick(d.key)}
-                />
-              ))}
+              {chartData.map((d) => {
+                const barColor = d.over ? c.overBudget : color;
+                return (
+                  <Cell
+                    key={d.key}
+                    fill={barColor}
+                    fillOpacity={d.off ? 0 : 0.28}
+                    stroke={barColor}
+                    strokeWidth={1.5}
+                    onClick={() => onBarClick(d.key)}
+                  />
+                );
+              })}
             </Bar>
             {budget != null ? (
               <Line
@@ -1148,8 +1180,12 @@ function IndividualTab({
       (s, c) => s + c.series.reduce((a, b) => a + b, 0) / n,
       0,
     );
-    return { n, avgIncome, avgSpend, diff: avgIncome - avgSpend };
+    const totalBudget = sumCategoryBudgets(data.categories);
+    return { n, avgIncome, avgSpend, diff: avgIncome - avgSpend, totalBudget };
   }, [data.months, data.categories]);
+
+  // Categories whose average monthly spend is over their budget, worst first.
+  const overBudget = useMemo(() => overBudgetCategories(data.categories), [data.categories]);
 
   const popupTx = popup ? txByKey.get(`${popup.category}\u0000${popup.monthKey}`) ?? [] : [];
   const popupMonthLabel = popup
@@ -1181,12 +1217,33 @@ function IndividualTab({
         </div>
       </div>
 
-      {/* Totals across all categories vs. average monthly income */}
-      <div className="grid gap-4 sm:grid-cols-3">
+      {/* Totals across all categories vs. budget and average monthly income */}
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Stat
           label="Avg spend · all categories"
           value={formatUsd(summary.avgSpend)}
           sub={`monthly average over ${summary.n} months`}
+        />
+        <Stat
+          label="Total budget · all categories"
+          value={formatUsd(summary.totalBudget)}
+          sub={
+            summary.totalBudget > 0 ? (
+              <span
+                className={
+                  summary.avgSpend > summary.totalBudget
+                    ? "text-red-600 dark:text-red-400"
+                    : "text-emerald-600 dark:text-emerald-400"
+                }
+              >
+                {summary.avgSpend > summary.totalBudget
+                  ? `${formatUsd(summary.avgSpend - summary.totalBudget)} over on average`
+                  : `${formatUsd(summary.totalBudget - summary.avgSpend)} under on average`}
+              </span>
+            ) : (
+              "no budgets set"
+            )
+          }
         />
         <Stat label="Avg monthly income" value={formatUsd(summary.avgIncome)} />
         <Stat
@@ -1207,6 +1264,35 @@ function IndividualTab({
           }
         />
       </div>
+
+      {/* Categories over their monthly budget (worst first) */}
+      {overBudget.length > 0 ? (
+        <div className="rounded-xl border border-red-200 bg-red-50/60 p-4 dark:border-red-900/40 dark:bg-red-950/25">
+          <div className="text-xs font-semibold uppercase tracking-wide text-red-700 dark:text-red-300">
+            Over budget
+          </div>
+          <p className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
+            Average monthly spend is above budget for {overBudget.length}{" "}
+            categor{overBudget.length === 1 ? "y" : "ies"}.
+          </p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {overBudget.map((r) => (
+              <button
+                key={r.name}
+                type="button"
+                onClick={() => setFilter(r.name)}
+                title={`${formatUsd(r.avg)} avg vs ${formatUsd(r.budget)} budget — filter to this category`}
+                className="inline-flex items-center gap-1.5 rounded-full border border-red-300 bg-white px-2.5 py-1 text-xs text-zinc-700 hover:bg-red-50 dark:border-red-900/60 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-red-950/40"
+              >
+                <span className="font-medium text-zinc-900 dark:text-zinc-100">{r.name}</span>
+                <span className="text-red-700 dark:text-red-400">
+                  {formatUsd(r.over)} over ({Math.round(r.pct * 100)}%)
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : null}
 
       {loading ? (
         <p className="text-sm text-zinc-500 dark:text-zinc-400">Loading transactions…</p>

@@ -111,6 +111,24 @@ export function buildSavingsPromptInput(data: ReportData): string {
     }
   }
 
+  const budgeted = data.categories
+    .filter((c) => c.monthlyBudget != null && c.monthlyBudget > 0)
+    .map((c) => ({ c, over: c.current - (c.monthlyBudget as number) }))
+    .sort((a, b) => b.over - a.over)
+    .slice(0, 12);
+  if (budgeted.length) {
+    lines.push(
+      "Budgets vs actual (the household set a monthly budget for these; over-budget categories are strong, grounded opportunities — the overage is a realistic monthly saving):",
+    );
+    for (const { c, over } of budgeted) {
+      const budget = c.monthlyBudget as number;
+      const tag = over > 0 ? `OVER budget by ${fmtUSD(over)}` : `under by ${fmtUSD(-over)}`;
+      lines.push(
+        `  - ${c.name}: budget ${fmtUSD(budget)}, now ${fmtUSD(c.current)} (${tag}).`,
+      );
+    }
+  }
+
   const feedback = (data.feedback ?? []).filter((f) => f.note.trim().length > 0);
   if (feedback.length) {
     lines.push(
@@ -130,7 +148,9 @@ const SYSTEM_PROMPT =
   "lowest-effort ways this household can save money, and rank them by impact × ease — the " +
   "biggest, easiest wins first. Ground every number in the data provided; never invent a " +
   "figure that isn't there, and never estimate a monthly saving larger than the amount a " +
-  "category is over its trailing average. If the data includes household notes & " +
+  "category is over its trailing average. When a category has a monthly budget, treat being " +
+  "over budget as a clear, grounded opportunity and prefer surfacing it; you may size its " +
+  "monthly saving as the amount it is over budget. If the data includes household notes & " +
   "constraints, treat them as authoritative: never recommend cutting something the " +
   "household has said they can't or won't change, respect their stated commitments and " +
   "corrections, and reflect that context in your actions (e.g. defer a change until a " +

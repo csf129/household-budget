@@ -32,6 +32,8 @@ export function getChartAxisTheme(isDark: boolean) {
     avgLine: isDark ? "#d0a74e" : "#b8913a",
     /** Budget reference line: Hearth's muted plum (distinct from the others). */
     budgetLine: isDark ? "#a284b2" : "#7a5c8a",
+    /** Over-budget emphasis (a month's spend above its budget). */
+    overBudget: isDark ? "#e06c75" : "#c0392b",
   };
 }
 
