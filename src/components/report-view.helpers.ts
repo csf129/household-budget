@@ -52,7 +52,13 @@ export function notesFromFeedback(
 export type RevertItem = { categoryId: string; monthlyBudget: number | null };
 
 export function fmtBudgetDate(iso: string): string {
-  const d = new Date(iso);
+  // Format from the calendar-date portion so the label matches how the caller
+  // groups rows (by `createdAt.slice(0, 10)`). Parsing the raw string with
+  // `new Date` treats a date-only value as UTC and then renders it in local
+  // time, which shows the day before in western timezones.
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso);
+  if (!m) return iso.slice(0, 10);
+  const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
   return Number.isNaN(d.getTime())
     ? iso.slice(0, 10)
     : d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
