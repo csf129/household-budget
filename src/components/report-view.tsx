@@ -21,40 +21,23 @@ import type {
   BudgetChange,
   ReportCategorySeries,
   ReportData,
-  ReportFeedback,
   ReportTransaction,
   ReportTransactionsPayload,
   SavingsAnalysis,
   SavingsEffort,
 } from "@/types/report";
+import {
+  BILL_HINTS,
+  CAR_HINTS,
+  MONTH_OPTIONS,
+  fmtBudgetDate,
+  groupRevertTargets,
+  matchesAny,
+  notesFromFeedback,
+  type DotRenderProps,
+  type RevertItem,
+} from "./report-view.helpers";
 
-/** Props Recharts passes to a custom `dot` renderer (only the bits we use). */
-type DotRenderProps = { cx?: number; cy?: number; index?: number; [k: string]: unknown };
-
-const BILL_HINTS = [
-  "electric",
-  "gas",
-  "propane",
-  "water",
-  "power",
-  "utility",
-  "utilities",
-  "internet",
-  "phone",
-  "cable",
-  "insurance",
-  "subscription",
-  "streaming",
-  "membership",
-];
-const CAR_HINTS = ["gas", "fuel", "auto", "car", "vehicle", "insurance", "dmv", "registration"];
-
-const matchesAny = (name: string, hints: string[]) => {
-  const n = name.toLowerCase();
-  return hints.some((h) => n.includes(h));
-};
-
-const MONTH_OPTIONS = [3, 6, 12];
 
 function Card({
   title,
@@ -173,15 +156,6 @@ const EFFORT_META: Record<
 };
 
 /** Build the category→note lookup the editors read from. "" = general note. */
-function notesFromFeedback(feedback: ReportFeedback[] | undefined): Record<string, string> {
-  const map: Record<string, string> = {};
-  for (const f of feedback ?? []) {
-    const note = f.note.trim();
-    if (note) map[f.category] = note;
-  }
-  return map;
-}
-
 type SaveNote = (category: string, note: string) => Promise<void>;
 
 /**
@@ -875,26 +849,6 @@ function TransactionsModal({
 }
 
 /** Modal listing the household's recent monthly-budget changes (audit trail). */
-type RevertItem = { categoryId: string; monthlyBudget: number | null };
-
-function fmtBudgetDate(iso: string): string {
-  const d = new Date(iso);
-  return Number.isNaN(d.getTime())
-    ? iso.slice(0, 10)
-    : d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
-}
-
-/** Per category in a day group, the revert target = the OLD amount of that
- * category's EARLIEST change that day (restores the pre-day state). Skips
- * categories that have since been deleted. `items` are newest-first. */
-function groupRevertTargets(items: BudgetChange[]): RevertItem[] {
-  const map = new Map<string, number | null>();
-  for (const ch of items) {
-    if (ch.categoryId == null) continue;
-    map.set(ch.categoryId, ch.oldAmount); // older rows overwrite → earliest wins
-  }
-  return [...map.entries()].map(([categoryId, monthlyBudget]) => ({ categoryId, monthlyBudget }));
-}
 
 function BudgetHistoryModal({
   onClose,
