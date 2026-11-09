@@ -33,10 +33,13 @@ describe("notesFromFeedback", () => {
 });
 
 describe("fmtBudgetDate", () => {
-  it("formats a valid ISO date (timezone-agnostic shape)", () => {
-    // The display day can shift by one in western timezones (date-only ISO is
-    // parsed as UTC then rendered local), so assert the format, not the exact day.
-    expect(fmtBudgetDate("2026-03-09")).toMatch(/^[A-Z][a-z]{2} \d{1,2}, 2026$/);
+  it("formats a date-only ISO string as the same calendar day in any timezone", () => {
+    expect(fmtBudgetDate("2026-03-09")).toBe("Mar 9, 2026");
+  });
+  it("uses the date portion of a timestamp, not the local-shifted instant", () => {
+    // A UTC timestamp early in the day must still show its own calendar date,
+    // matching how the caller groups rows (createdAt.slice(0, 10)).
+    expect(fmtBudgetDate("2026-03-09T02:00:00Z")).toBe("Mar 9, 2026");
   });
   it("falls back to the first 10 chars for an invalid date", () => {
     expect(fmtBudgetDate("not-a-date")).toBe("not-a-date");
