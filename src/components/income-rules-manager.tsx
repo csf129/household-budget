@@ -3,10 +3,13 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
+import { resolveIncomeTreatmentFromRules } from "@/lib/apply-income-rules";
 import {
-  resolveIncomeTreatmentFromRules,
-  type IncomeRuleRow as EngineIncomeRuleRow,
-} from "@/lib/apply-income-rules";
+  AMOUNT_SIGN_OPTIONS,
+  MATCH_TYPES,
+  amountSignShortLabel,
+  rulesForEngine,
+} from "./income-rules-manager.helpers";
 import { requestClassifyIncome } from "@/lib/auto-classify-income-client";
 import { TransactionEditModal } from "@/components/transaction-edit-modal";
 import { createClient } from "@/lib/supabase/client";
@@ -25,40 +28,6 @@ import type {
   TransactionRow,
 } from "@/types/finance";
 
-const MATCH_TYPES: {
-  value: IncomeRuleView["match_type"];
-  label: string;
-  hint: string;
-}[] = [
-  {
-    value: "exact_normalized",
-    label: "Exact match",
-    hint: "Entire normalized description must equal this text.",
-  },
-  {
-    value: "contains",
-    label: "Contains",
-    hint: "Normalized description includes this substring.",
-  },
-  {
-    value: "prefix",
-    label: "Starts with",
-    hint: "Normalized description begins with this text.",
-  },
-];
-
-const AMOUNT_SIGN_OPTIONS: { value: AmountSignFilter; label: string }[] = [
-  { value: "any", label: "Any (credits or debits)" },
-  { value: "positive", label: "Positive amounts only" },
-  { value: "negative", label: "Negative amounts only" },
-];
-
-function amountSignShortLabel(v: AmountSignFilter): string {
-  if (v === "positive") return "Positive";
-  if (v === "negative") return "Negative";
-  return "Any";
-}
-
 type Props = {
   householdId: string;
   initialRules: IncomeRuleView[];
@@ -67,16 +36,6 @@ type Props = {
   embedded?: boolean;
   ledgerArchiveColumnAvailable?: boolean;
 };
-
-function rulesForEngine(list: IncomeRuleView[]): EngineIncomeRuleRow[] {
-  return list.map((r) => ({
-    match_type: r.match_type,
-    pattern: r.pattern,
-    priority: r.priority,
-    treatment: r.treatment,
-    amount_sign: r.amount_sign,
-  }));
-}
 
 export function IncomeRulesManager({
   householdId,
