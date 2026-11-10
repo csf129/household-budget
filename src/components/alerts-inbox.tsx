@@ -3,46 +3,17 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import type { AlertItem } from "@/lib/alerts";
+import {
+  formatAlertDate,
+  formatUsd,
+  readStoredIds,
+  saveReadIds,
+} from "./alerts-inbox.helpers";
 
 type Props = {
   alerts: AlertItem[];
   householdId: string;
 };
-
-const READ_KEY_PREFIX = "alerts-read:";
-
-function readStoredIds(householdId: string): Set<string> {
-  if (typeof window === "undefined") return new Set();
-  try {
-    const raw = window.localStorage.getItem(`${READ_KEY_PREFIX}${householdId}`);
-    if (!raw) return new Set();
-    return new Set(JSON.parse(raw) as string[]);
-  } catch {
-    return new Set();
-  }
-}
-
-function saveReadIds(householdId: string, ids: Set<string>) {
-  try {
-    window.localStorage.setItem(
-      `${READ_KEY_PREFIX}${householdId}`,
-      JSON.stringify([...ids]),
-    );
-  } catch { /* ignore */ }
-}
-
-function formatAlertDate(iso: string): string {
-  try {
-    const d = new Date(`${iso}T00:00:00`);
-    return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
-  } catch {
-    return iso;
-  }
-}
-
-function formatUsd(amount: number): string {
-  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(Math.abs(amount));
-}
 
 const SEVERITY_STYLES = {
   warning: {
