@@ -17,15 +17,19 @@ import { getHouseholdAiModel } from "@/lib/get-household-ai-model";
  * with the same `CRON_SECRET` bearer token. It first runs a safety-net Plaid
  * sync for this household's active connections (the webhook is the primary
  * trigger; this backfills dropped/rejected deliveries), then reads categories
- * and transactions with the service-role client, derives the aggregate rollup
+ * and transactions with the service-role client, derives the rollup
  * (computeHearthRollup — the only thing that leaves this app), and writes it
  * into Hearth with Hearth's service-role client.
  *
  * Which household maps to which is one pair of env vars:
  *   BUDGET_HOUSEHOLD_ID  — the household here to summarise
  *   HEARTH_HOUSEHOLD_ID  — the Hearth household to write it to
- * Nothing but the aggregate rollup ever leaves for Hearth: the Plaid sync only
- * writes into this app's own tables; no accounts or transactions go to Hearth.
+ * What leaves for Hearth: the aggregates (week/month, categories, trend,
+ * account balances), the per-category split behind each trend month, and the
+ * trailing twelve months of *spending* transactions (date, merchant, amount,
+ * category, account display name) so Hearth's charts can break a bar down.
+ * Never account numbers, Plaid tokens or income/transfer rows. The Plaid sync
+ * itself only writes into this app's own tables.
  */
 export const maxDuration = 120;
 
